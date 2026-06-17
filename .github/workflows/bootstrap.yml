@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ".bootstrap/**"
+      - "shopify-boekhouding-mvp.zip"
       - ".github/workflows/bootstrap.yml"
   workflow_dispatch:
 
@@ -15,19 +15,23 @@ jobs:
   bootstrap:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Project herstellen
+      - name: Controleer ZIP
         shell: bash
         run: |
           set -euo pipefail
-          cat .bootstrap/part-* > project.zip.b64
-          base64 --decode --ignore-garbage project.zip.b64 > project.zip
-          echo "ZIP sha256: $(sha256sum project.zip | awk '{print $1}')"
-          unzip -t project.zip
-          unzip -q -o project.zip
+          test -f shopify-boekhouding-mvp.zip
+          echo "ZIP sha256: $(sha256sum shopify-boekhouding-mvp.zip | awk '{print $1}')"
+          unzip -t shopify-boekhouding-mvp.zip
+
+      - name: Project uitpakken
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q -o shopify-boekhouding-mvp.zip
           cp -a shopify-boekhouding/. .
-          rm -rf shopify-boekhouding project.zip project.zip.b64 .bootstrap
+          rm -rf shopify-boekhouding shopify-boekhouding-mvp.zip .bootstrap
           rm -f .github/workflows/bootstrap.yml
 
       - name: Broncode publiceren
