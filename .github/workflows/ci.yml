@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+env:
+  DATABASE_URL: postgresql://localhost:5432/shopify_boekhouding_test
+  DIRECT_URL: postgresql://localhost:5432/shopify_boekhouding_test
+  SHOPIFY_API_KEY: test
+  SHOPIFY_API_SECRET: test
+  SHOPIFY_APP_URL: https://example.com
+  SCOPES: read_orders,read_shopify_payments_payouts
+
 jobs:
   verify:
     runs-on: ubuntu-latest
