@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum OrderSyncStatus {
+  PENDING
+  POSTED
+  ERROR
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Shop {
+  id             String              @id @default(cuid())
+  domain         String              @unique
+  currency       String              @default("EUR")
+  countryCode    String              @default("NL")
+  timezone       String              @default("Europe/Amsterdam")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  uninstalledAt  DateTime?
+  settings       AccountingSettings?
+  ledgerAccounts LedgerAccount[]
+  taxCodes       TaxCode[]
+  orders         OrderSnapshot[]
+  payouts        Payout[]
+  expenses       Expense[]
+  journalEntries JournalEntry[]
+  importRuns     ImportRun[]
+  syncErrors     SyncError[]
+}
+
+model AccountingSettings {
+  id                   String   @id @default(cuid())
+  shopId               String   @unique
+  bookkeepingStart     DateTime
+  fiscalYearStartMonth Int      @default(1)
+  lockedThrough        DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  shop                 Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model LedgerAccount {
+  id        String       @id @default(cuid())
+  shopId    String
+  code      String
+  name      String
+  type      AccountType
+  systemKey String
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  shop      Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lines     JournalLine[]
+
+  @@unique([shopId, code])
+  @@unique([shopId, systemKey])
+  @@index([shopId, type])
+}
+
+model TaxCode {
+  id           String   @id @default(cuid())
+  shopId       String
+  code         String
+  name         String
+  rate         Decimal  @db.Decimal(5, 2)
+  reportingBox String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, code])
+}
+
+model OrderSnapshot {
+  id                   String          @id @default(cuid())
+  shopId               String
+  shopifyOrderId       String
+  orderNumber          String
+  processedAt          DateTime
+  currency             String
+  subtotalCents        BigInt
+  taxCents             BigInt
+  shippingCents        BigInt
+  discountCents        BigInt
+  grossCents           BigInt
+  refundCents          BigInt          @default(0)
+  refundTaxCents       BigInt          @default(0)
+  sourceHash           String
+  sourceJson           Json
+  syncStatus           OrderSyncStatus @default(PENDING)
+  syncError            String?
+  activeJournalEntryId String?         @unique
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  shop                 Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  activeJournalEntry   JournalEntry?   @relation("ActiveOrderJournal", fields: [activeJournalEntryId], references: [id])
+
+  @@unique([shopId, shopifyOrderId])
+  @@index([shopId, processedAt])
+}
+
+model Payout {
+  id                     String        @id @default(cuid())
+  shopId                 String
+  shopifyPayoutId        String
+  legacyResourceId       String
+  issuedAt               DateTime
+  status                 String
+  transactionType        String
+  currency               String
+  netCents               BigInt
+  feeCents               BigInt
+  clearingCents          BigInt
+  transactionAmountCents BigInt
+  sourceHash             String
+  sourceJson             Json
+  journalEntryId         String?       @unique
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  shop                   Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  journalEntry           JournalEntry? @relation(fields: [journalEntryId], references: [id])
+
+  @@unique([shopId, shopifyPayoutId])
+  @@index([shopId, issuedAt])
+}
+
+model Expense {
+  id             String       @id @default(cuid())
+  shopId         String
+  date           DateTime
+  supplier       String
+  description    String
+  invoiceNumber  String?
+  netCents       BigInt
+  vatCents       BigInt
+  totalCents     BigInt
+  journalEntryId String       @unique
+  createdAt      DateTime     @default(now())
+  shop           Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+
+  @@index([shopId, date])
+}
+
+model JournalEntry {
+  id             String          @id @default(cuid())
+  shopId         String
+  entryNumber    Int
+  date           DateTime
+  description    String
+  sourceType     String
+  sourceId       String
+  sourceHash     String
+  status         JournalStatus   @default(DRAFT)
+  warning        String?
+  postedAt       DateTime?
+  reversedAt     DateTime?
+  reversalOfId   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lines          JournalLine[]
+  activeForOrder OrderSnapshot?  @relation("ActiveOrderJournal")
+  payout         Payout?
+  expense        Expense?
+  reversalOf     JournalEntry?   @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals      JournalEntry[]  @relation("JournalReversal")
+
+  @@unique([shopId, entryNumber])
+  @@index([shopId, date])
+  @@index([shopId, sourceType, sourceId])
+}
+
+model JournalLine {
+  id          String        @id @default(cuid())
+  entryId     String
+  accountId   String
+  debitCents  BigInt        @default(0)
+  creditCents BigInt        @default(0)
+  memo        String
+  createdAt   DateTime      @default(now())
+  entry       JournalEntry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account     LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+model WebhookDelivery {
+  id          String    @id
+  shopDomain  String
+  topic       String
+  payloadHash String
+  status      String
+  error       String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([shopDomain, receivedAt])
+}
+
+model ImportRun {
+  id            String    @id @default(cuid())
+  shopId        String
+  type          String
+  status        String    @default("RUNNING")
+  importedCount Int       @default(0)
+  failedCount   Int       @default(0)
+  error         String?
+  startedAt     DateTime
+  finishedAt    DateTime?
+  shop          Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, startedAt])
+}
+
+model SyncError {
+  id         String    @id @default(cuid())
+  shopId     String
+  sourceType String
+  sourceId   String
+  message    String
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  shop       Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, resolvedAt])
+}

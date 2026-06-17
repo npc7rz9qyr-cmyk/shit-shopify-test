@@ -1,0 +1,37 @@
+# Vul client_id in nadat je de app in het Shopify Dev Dashboard hebt aangemaakt.
+client_id = "VUL_HIER_JE_SHOPIFY_CLIENT_ID_IN"
+name = "Shopify Boekhouding"
+application_url = "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[access_scopes]
+scopes = "read_orders,read_all_orders,read_shopify_payments_payouts"
+
+[auth]
+redirect_urls = [
+  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/auth/callback",
+  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/auth/shopify/callback",
+  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create", "orders/updated", "orders/cancelled"]
+  uri = "/webhooks/orders"
+
+  [[webhooks.subscriptions]]
+  topics = ["refunds/create"]
+  uri = "/webhooks/refunds"
+
+[pos]
+embedded = false
