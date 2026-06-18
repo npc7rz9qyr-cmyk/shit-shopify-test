@@ -4,19 +4,12 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { importOrders } from "../services/import-orders.server";
 
-function recentOrdersStartDate() {
-  const date = new Date();
-  date.setDate(date.getDate() - 59);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
+const ALL_ORDERS_START_DATE = new Date("2000-01-01T00:00:00.000Z");
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
-  const earliestAllowedDate = recentOrdersStartDate();
-  const configuredStartDate = shop.settings?.bookkeepingStart || earliestAllowedDate;
-  const startDate = configuredStartDate < earliestAllowedDate ? earliestAllowedDate : configuredStartDate;
+  const startDate = shop.settings?.bookkeepingStart || ALL_ORDERS_START_DATE;
 
   try {
     const result = await importOrders(admin, shop.id, startDate);
