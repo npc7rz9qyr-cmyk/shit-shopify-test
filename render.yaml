@@ -2,7 +2,7 @@ services:
   - type: web
     name: shopify-boekhouding
     runtime: node
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: npm run render-build
     preDeployCommand: npx prisma migrate deploy && node prisma/seed.mjs
@@ -23,18 +23,6 @@ services:
       - key: SCOPES
         value: read_orders,read_shopify_payments_payouts
       - key: DATABASE_URL
-        fromDatabase:
-          name: shopify-boekhouding-db
-          property: connectionString
+        sync: false
       - key: DIRECT_URL
-        fromDatabase:
-          name: shopify-boekhouding-db
-          property: connectionString
-
-databases:
-  - name: shopify-boekhouding-db
-    plan: basic-256mb
-    region: frankfurt
-    databaseName: shopify_boekhouding
-    user: shopify_boekhouding
-    postgresMajorVersion: "17"
+        sync: false
