@@ -1,6 +1,6 @@
 client_id = "e61b4105d57657b7d5d8c5a8dc80cc74"
 name = "Shopify Boekhouding"
-application_url = "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com"
+application_url = "https://shopify-boekhouding.onrender.com"
 embedded = true
 
 [build]
@@ -12,9 +12,9 @@ scopes = "read_orders,read_shopify_payments_payouts"
 
 [auth]
 redirect_urls = [
-  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/auth/callback",
-  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/auth/shopify/callback",
-  "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com/api/auth/callback"
+  "https://shopify-boekhouding.onrender.com/auth/callback",
+  "https://shopify-boekhouding.onrender.com/auth/shopify/callback",
+  "https://shopify-boekhouding.onrender.com/api/auth/callback"
 ]
 
 [webhooks]
