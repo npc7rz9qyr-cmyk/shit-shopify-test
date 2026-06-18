@@ -47,6 +47,17 @@ function yearOptions(selectedYear: number) {
   return Array.from(years).sort((a, b) => b - a);
 }
 
+const nativeButtonStyle = {
+  minHeight: "2.25rem",
+  padding: "0 0.9rem",
+  border: "1px solid #303030",
+  borderRadius: "0.5rem",
+  background: "#303030",
+  color: "white",
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
@@ -126,7 +137,7 @@ export default function Dashboard() {
                 <option value="4">Q4 — oktober t/m december</option>
               </select>
             </div>
-            <div><s-button type="submit">Dashboard tonen</s-button></div>
+            <div><button type="submit" style={nativeButtonStyle}>Dashboard tonen</button></div>
           </div>
         </Form>
       </s-section>
@@ -147,8 +158,12 @@ export default function Dashboard() {
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
       <s-section heading="Synchronisatie">
-        <s-paragraph>Importeer alle bestellingen vanaf de ingestelde boekhoudstartdatum. De import is idempotent: dezelfde order wordt niet dubbel geboekt.</s-paragraph>
-        <Form method="post" action="/app/import"><s-button type="submit" variant="primary">Alle orders importeren</s-button></Form>
+        <s-paragraph>Importeer alle bestellingen vanaf de ingestelde boekhoudstartdatum. Na de import blijf je op het gekozen kwartaal.</s-paragraph>
+        <Form method="post" action="/app/import">
+          <input type="hidden" name="year" value={data.selectedYear} />
+          <input type="hidden" name="quarter" value={data.selectedQuarter} />
+          <button type="submit" style={nativeButtonStyle}>Alle orders importeren</button>
+        </Form>
       </s-section>
     </s-page>
   );
