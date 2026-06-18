@@ -1,5 +1,4 @@
-# Vul client_id in nadat je de app in het Shopify Dev Dashboard hebt aangemaakt.
-client_id = "VUL_HIER_JE_SHOPIFY_CLIENT_ID_IN"
+client_id = "e61b4105d57657b7d5d8c5a8dc80cc74"
 name = "Shopify Boekhouding"
 application_url = "https://VUL-HIER-JE-RENDER-URL-IN.onrender.com"
 embedded = true
