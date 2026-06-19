@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Form, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -47,7 +48,7 @@ function yearOptions(selectedYear: number) {
   return Array.from(years).sort((a, b) => b - a);
 }
 
-const nativeButtonStyle = {
+const nativeButtonStyle: CSSProperties = {
   minHeight: "2.25rem",
   padding: "0 0.9rem",
   border: "1px solid #303030",
@@ -56,6 +57,12 @@ const nativeButtonStyle = {
   color: "white",
   fontWeight: 600,
   cursor: "pointer",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  ...nativeButtonStyle,
+  background: "white",
+  color: "#303030",
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -117,11 +124,11 @@ export default function Dashboard() {
   const data = useLoaderData<typeof loader>();
   return (
     <s-page heading="Boekhouding">
-      <s-button slot="primary-action" href="/app/orders">Bekijk verkoop</s-button>
+      <s-button slot="primary-action" href={`/app/orders?year=${data.selectedYear}&quarter=${data.selectedQuarter}`}>Bekijk verkoop</s-button>
 
       <s-section heading="Dashboard kwartaal">
         <Form method="get">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(12rem, 1fr))", gap: "0.75rem", alignItems: "end", maxWidth: "42rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(12rem, 1fr))", gap: "0.75rem", alignItems: "end", maxWidth: "52rem" }}>
             <div style={{ display: "grid", gap: "0.35rem" }}>
               <label htmlFor="year" style={{ fontWeight: 600 }}>Jaar</label>
               <select id="year" name="year" defaultValue={String(data.selectedYear)} style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", background: "white" }}>
@@ -137,7 +144,10 @@ export default function Dashboard() {
                 <option value="4">Q4 — oktober t/m december</option>
               </select>
             </div>
-            <div><button type="submit" style={nativeButtonStyle}>Dashboard tonen</button></div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              <button type="submit" style={secondaryButtonStyle}>Dashboard tonen</button>
+              <button type="submit" formMethod="post" formAction="/app/import" style={nativeButtonStyle}>Importeer dit kwartaal</button>
+            </div>
           </div>
         </Form>
       </s-section>
@@ -158,12 +168,7 @@ export default function Dashboard() {
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
       <s-section heading="Synchronisatie">
-        <s-paragraph>Importeer alle bestellingen vanaf de ingestelde boekhoudstartdatum. Na de import blijf je op het gekozen kwartaal.</s-paragraph>
-        <Form method="post" action="/app/import">
-          <input type="hidden" name="year" value={data.selectedYear} />
-          <input type="hidden" name="quarter" value={data.selectedQuarter} />
-          <button type="submit" style={nativeButtonStyle}>Alle orders importeren</button>
-        </Form>
+        <s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op.</s-paragraph>
       </s-section>
     </s-page>
   );
