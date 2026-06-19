@@ -7,8 +7,8 @@ type AdminGraphqlContext = {
 };
 
 const ORDERS_QUERY = `#graphql
-  query AccountingOrders($first: Int!, $after: String, $query: String) {
-    orders(first: $first, after: $after, sortKey: CREATED_AT, query: $query) {
+  query AccountingOrders($first: Int!, $after: String) {
+    orders(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
       pageInfo {
         hasNextPage
         endCursor
@@ -40,14 +40,22 @@ const ORDERS_QUERY = `#graphql
   }
 `;
 
-function shopifyDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+type GraphqlOrder = Parameters<typeof normalizeGraphqlOrder>[0] & {
+  createdAt?: string | null;
+  processedAt?: string | null;
+};
+
+function orderDate(order: GraphqlOrder) {
+  return new Date(order.createdAt || order.processedAt || new Date().toISOString());
 }
 
-function orderSearchQuery(startDate: Date, endDate?: Date) {
-  const parts = [`created_at:>=${shopifyDate(startDate)}`];
-  if (endDate) parts.push(`created_at:<=${shopifyDate(endDate)}`);
-  return parts.join(" ");
+function isInPeriod(order: GraphqlOrder, startDate: Date, endDate?: Date) {
+  const date = orderDate(order);
+  return date >= startDate && (!endDate || date <= endDate);
+}
+
+function isOlderThanPeriod(order: GraphqlOrder, startDate: Date) {
+  return orderDate(order) < startDate;
 }
 
 export async function importOrders(
@@ -63,22 +71,22 @@ export async function importOrders(
   let after: string | null = null;
   let imported = 0;
   let failed = 0;
-  const query = orderSearchQuery(startDate, endDate);
+  let reachedOlderOrders = false;
+  let scanned = 0;
 
   try {
     do {
       const response = await admin.graphql(ORDERS_QUERY, {
         variables: {
-          first: 50,
+          first: 100,
           after,
-          query,
         },
       });
       const body = (await response.json()) as {
         data?: {
           orders?: {
             pageInfo: { hasNextPage: boolean; endCursor: string | null };
-            nodes: Array<Parameters<typeof normalizeGraphqlOrder>[0]>;
+            nodes: Array<GraphqlOrder>;
           };
         };
         errors?: Array<{ message: string }>;
@@ -92,6 +100,17 @@ export async function importOrders(
       if (!connection) throw new Error("Shopify gaf geen orders terug");
 
       for (const order of connection.nodes) {
+        scanned += 1;
+
+        if (isOlderThanPeriod(order, startDate)) {
+          reachedOlderOrders = true;
+          continue;
+        }
+
+        if (!isInPeriod(order, startDate, endDate)) {
+          continue;
+        }
+
         try {
           await postOrder(shopId, normalizeGraphqlOrder(order));
           imported += 1;
@@ -109,7 +128,7 @@ export async function importOrders(
       }
 
       after = connection.pageInfo.endCursor;
-      if (!connection.pageInfo.hasNextPage) break;
+      if (!connection.pageInfo.hasNextPage || reachedOlderOrders) break;
     } while (after);
 
     await prisma.importRun.update({
@@ -119,6 +138,7 @@ export async function importOrders(
         status: failed ? "COMPLETED_WITH_ERRORS" : "COMPLETED",
         importedCount: imported,
         failedCount: failed,
+        error: imported === 0 ? `Geen orders gevonden in gekozen periode na ${scanned} gescande Shopify-orders.` : null,
       },
     });
 
