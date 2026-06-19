@@ -4,8 +4,6 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { importOrders } from "../services/import-orders.server";
 
-const ALL_ORDERS_START_DATE = new Date("2000-01-01T00:00:00.000Z");
-
 function safeYear(value: FormDataEntryValue | null) {
   const parsed = Number(value);
   const currentYear = new Date().getFullYear();
@@ -22,19 +20,27 @@ function safeQuarter(value: FormDataEntryValue | null) {
     : currentQuarter;
 }
 
+function quarterRange(year: number, quarter: number) {
+  const startMonth = (quarter - 1) * 3;
+  return {
+    start: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999)),
+  };
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
   const formData = await request.formData();
   const year = safeYear(formData.get("year"));
   const quarter = safeQuarter(formData.get("quarter"));
-  const startDate = shop.settings?.bookkeepingStart || ALL_ORDERS_START_DATE;
+  const { start, end } = quarterRange(year, quarter);
   const redirectParams = `year=${year}&quarter=${quarter}`;
 
   try {
-    const result = await importOrders(admin, shop.id, startDate);
+    const result = await importOrders(admin, shop.id, start, end);
     return redirect(
-      `/app/orders?${redirectParams}&imported=${result.imported}&failed=${result.failed}&start=${startDate.toISOString().slice(0, 10)}`,
+      `/app/orders?${redirectParams}&imported=${result.imported}&failed=${result.failed}&start=${start.toISOString().slice(0, 10)}&end=${end.toISOString().slice(0, 10)}`,
     );
   } catch (error) {
     const message = encodeURIComponent(
