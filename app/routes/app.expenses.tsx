@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useLoaderData } from "react-router";
+import { ReceiptOcrScanner } from "../components/ReceiptOcrScanner";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
@@ -186,48 +187,16 @@ type ExpenseFieldProps = {
   required?: boolean;
 };
 
-function ExpenseField({
-  id,
-  label,
-  type = "text",
-  defaultValue,
-  step,
-  required = false,
-}: ExpenseFieldProps) {
+function ExpenseField({ id, label, type = "text", defaultValue, step, required = false }: ExpenseFieldProps) {
   return (
     <div style={{ display: "grid", gap: "0.35rem" }}>
-      <label htmlFor={id} style={{ fontWeight: 600 }}>
-        {label}
-      </label>
-      <input
-        id={id}
-        name={id}
-        type={type}
-        defaultValue={defaultValue}
-        step={step}
-        required={required}
-        style={{
-          padding: "0.65rem",
-          border: "1px solid #8c9196",
-          borderRadius: "0.5rem",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      />
+      <label htmlFor={id} style={{ fontWeight: 600 }}>{label}</label>
+      <input id={id} name={id} type={type} defaultValue={defaultValue} step={step} required={required} style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
     </div>
   );
 }
 
-const buttonStyle = {
-  minHeight: "2.25rem",
-  padding: "0 0.9rem",
-  border: "1px solid #303030",
-  borderRadius: "0.5rem",
-  background: "#303030",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer",
-};
+const buttonStyle = { minHeight: "2.25rem", padding: "0 0.9rem", border: "1px solid #303030", borderRadius: "0.5rem", background: "#303030", color: "white", fontWeight: 600, cursor: "pointer" };
 
 export default function ExpensesPage() {
   const { expenses, defaults, saved, scanned, error } = useLoaderData<typeof loader>();
@@ -239,12 +208,13 @@ export default function ExpensesPage() {
       {scanned ? <s-section><s-banner tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
 
       <s-section heading="Bon/factuur scanner">
-        <s-paragraph>Scan je bon met je telefoon of gebruik Live Text/OCR en plak de tekst hieronder. De app vult daarna leverancier, datum, totaal, btw en omschrijving alvast in.</s-paragraph>
+        <s-paragraph>Maak direct een foto of upload een bon. De app leest de bon met OCR en vult leverancier, datum, totaal, btw en omschrijving alvast in.</s-paragraph>
+        <ReceiptOcrScanner />
         <Form method="post">
           <input type="hidden" name="intent" value="scan" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem" }}>
-            <textarea name="receiptText" rows={8} placeholder="Plak hier de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
-            <div><button type="submit" style={buttonStyle}>Bon uitlezen</button></div>
+            <textarea name="receiptText" rows={8} placeholder="Of plak hier handmatig de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
+            <div><button type="submit" style={buttonStyle}>Bontekst uitlezen</button></div>
           </div>
         </Form>
       </s-section>
@@ -269,9 +239,7 @@ export default function ExpensesPage() {
             <ExpenseField id="vat" label="Btw" type="number" step="0.01" defaultValue={defaults.vat} />
             <ExpenseField id="total" label="Totaal betaald" type="number" step="0.01" defaultValue={defaults.total} required />
             <s-paragraph>Laat exclusief btw en btw leeg als je alleen het totaal weet. De app rekent dan automatisch terug op basis van het gekozen btw-percentage.</s-paragraph>
-            <div>
-              <button type="submit" style={buttonStyle}>Kosten boeken</button>
-            </div>
+            <div><button type="submit" style={buttonStyle}>Kosten boeken</button></div>
           </div>
         </Form>
       </s-section>
