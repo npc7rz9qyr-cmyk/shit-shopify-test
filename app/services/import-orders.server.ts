@@ -39,10 +39,21 @@ const ORDERS_QUERY = `#graphql
   }
 `;
 
+function shopifyDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function orderSearchQuery(startDate: Date, endDate?: Date) {
+  const parts = [`processed_at:>=${shopifyDate(startDate)}`];
+  if (endDate) parts.push(`processed_at:<=${shopifyDate(endDate)}`);
+  return parts.join(" ");
+}
+
 export async function importOrders(
   admin: AdminGraphqlContext,
   shopId: string,
   startDate: Date,
+  endDate?: Date,
 ) {
   const run = await prisma.importRun.create({
     data: { shopId, type: "ORDERS", startedAt: new Date() },
@@ -51,6 +62,7 @@ export async function importOrders(
   let after: string | null = null;
   let imported = 0;
   let failed = 0;
+  const query = orderSearchQuery(startDate, endDate);
 
   try {
     do {
@@ -58,7 +70,7 @@ export async function importOrders(
         variables: {
           first: 50,
           after,
-          query: `processed_at:>=${startDate.toISOString().slice(0, 10)}`,
+          query,
         },
       });
       const body = (await response.json()) as {
