@@ -77,7 +77,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     imported: url.searchParams.get("imported"),
     failed: url.searchParams.get("failed"),
-    start: url.searchParams.get("start"),
+    importStart: url.searchParams.get("start"),
+    importEnd: url.searchParams.get("end"),
     error: url.searchParams.get("error"),
     selectedYear,
     selectedQuarter,
@@ -104,7 +105,8 @@ export default function OrdersPage() {
     orders,
     imported,
     failed,
-    start,
+    importStart,
+    importEnd,
     error,
     selectedYear,
     selectedQuarter,
@@ -118,7 +120,7 @@ export default function OrdersPage() {
   return (
     <s-page heading="Verkoop">
       <s-button slot="primary-action" href="/app">
-        Nieuwe import
+        Terug naar dashboard
       </s-button>
 
       {error ? (
@@ -130,7 +132,7 @@ export default function OrdersPage() {
       {imported ? (
         <s-section>
           <s-banner tone={failed && failed !== "0" ? "warning" : "success"}>
-            Import klaar vanaf {start || "de ingestelde datum"}: {imported} orders verwerkt, {failed || "0"} mislukt.
+            Import klaar voor {importStart || periodStart} t/m {importEnd || periodEnd}: {imported} orders verwerkt, {failed || "0"} mislukt.
           </s-banner>
         </s-section>
       ) : null}
@@ -192,7 +194,7 @@ export default function OrdersPage() {
             </div>
 
             <div>
-              <s-button type="submit">Orders tonen</s-button>
+              <button type="submit" style={{ minHeight: "2.25rem", padding: "0 0.9rem", border: "1px solid #303030", borderRadius: "0.5rem", background: "#303030", color: "white", fontWeight: 600, cursor: "pointer" }}>Orders tonen</button>
             </div>
           </div>
         </Form>
@@ -204,7 +206,7 @@ export default function OrdersPage() {
         </s-paragraph>
 
         {orders.length === 0 ? (
-          <s-paragraph>Geen orders gevonden in dit kwartaal.</s-paragraph>
+          <s-paragraph>Geen orders gevonden in dit kwartaal. Importeer dit kwartaal eerst vanuit het dashboard.</s-paragraph>
         ) : (
           <s-table>
             <s-table-header-row>
