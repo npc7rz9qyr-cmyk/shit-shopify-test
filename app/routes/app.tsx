@@ -9,11 +9,15 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import "../styles.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   await ensureShop(session.shop, admin);
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    shop: session.shop,
+  };
 };
 
 const navigationItems = [
@@ -28,43 +32,63 @@ const navigationItems = [
 ] as const;
 
 export default function AppLayout() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, shop } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
-      <nav
-        aria-label="Hoofdnavigatie"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-          padding: "0.75rem 1rem",
-          borderBottom: "1px solid #e1e3e5",
-          background: "#ffffff",
-        }}
-      >
-        {navigationItems.map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/app"}
-            style={({ isActive }) => ({
-              display: "inline-flex",
-              alignItems: "center",
-              minHeight: "2.25rem",
-              padding: "0 0.75rem",
-              borderRadius: "0.5rem",
-              textDecoration: "none",
-              fontWeight: isActive ? 700 : 500,
-              color: "#202223",
-              background: isActive ? "#f1f2f3" : "transparent",
-            })}
-          >
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-      <Outlet />
+      <div className="modern-shell">
+        <aside className="modern-sidebar">
+          <div className="modern-brand">
+            <div className="brand-row">
+              <div className="brand-logo">B</div>
+              <div>
+                <div className="brand-name">Boekhouder</div>
+                <div className="brand-desc">Shopify btw & administratie</div>
+              </div>
+            </div>
+            <div className="brand-metrics">
+              <div className="brand-metric">
+                <strong>Status</strong>
+                <span>Live</span>
+              </div>
+              <div className="brand-metric">
+                <strong>Focus</strong>
+                <span>BTW</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="modern-nav-card">
+            <nav className="modern-nav" aria-label="Hoofdnavigatie">
+              {navigationItems.map(([to, label]) => (
+                <NavLink key={to} to={to} end={to === "/app"}>
+                  {label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+
+          <div className="modern-help-card">
+            <strong>Kwartaal klaarzetten</strong>
+            <p>Importeer orders, boek kosten en neem daarna de btw-rubrieken direct over vanaf het dashboard.</p>
+          </div>
+        </aside>
+
+        <main className="modern-main">
+          <header className="modern-topbar">
+            <div>
+              <div className="topbar-kicker">Administratie actief</div>
+              <h1>Financieel dashboard</h1>
+              <p>Omzet, kosten, btw-aangifte en boekingen in één modern overzicht.</p>
+            </div>
+            <div className="shop-pill">{shop}</div>
+          </header>
+
+          <div className="modern-page">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </AppProvider>
   );
 }
