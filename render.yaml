@@ -21,7 +21,7 @@ services:
       - key: SHOPIFY_APP_URL
         value: https://shit-shopify-test.onrender.com
       - key: SCOPES
-        value: read_orders,read_shopify_payments_payouts
+        value: read_orders,read_all_orders,read_shopify_payments_payouts
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
