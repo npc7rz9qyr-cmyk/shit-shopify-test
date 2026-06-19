@@ -4,6 +4,16 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { importOrders } from "../services/import-orders.server";
 
+const ACCESS_SCOPES_QUERY = `#graphql
+  query GrantedAccessScopes {
+    appInstallation {
+      accessScopes {
+        handle
+      }
+    }
+  }
+`;
+
 function safeYear(value: FormDataEntryValue | null) {
   const parsed = Number(value);
   const currentYear = new Date().getFullYear();
@@ -28,6 +38,27 @@ function quarterRange(year: number, quarter: number) {
   };
 }
 
+function olderThanDefaultOrderWindow(date: Date) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 60);
+  cutoff.setHours(0, 0, 0, 0);
+  return date < cutoff;
+}
+
+async function grantedScopes(admin: { graphql: (query: string) => Promise<Response> }) {
+  const response = await admin.graphql(ACCESS_SCOPES_QUERY);
+  const body = (await response.json()) as {
+    data?: { appInstallation?: { accessScopes?: Array<{ handle: string }> } };
+    errors?: Array<{ message: string }>;
+  };
+
+  if (body.errors?.length) {
+    throw new Error(body.errors.map((error) => error.message).join("; "));
+  }
+
+  return (body.data?.appInstallation?.accessScopes || []).map((scope) => scope.handle);
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
@@ -38,6 +69,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const redirectParams = `year=${year}&quarter=${quarter}`;
 
   try {
+    const scopes = await grantedScopes(admin);
+
+    if (olderThanDefaultOrderWindow(start) && !scopes.includes("read_all_orders")) {
+      const message = encodeURIComponent(
+        `Shopify geeft deze app nog geen read_all_orders toegang. Toegekende scopes: ${scopes.join(", ") || "geen"}. Vraag read_all_orders aan/keur die goed in Partner Dashboard, deploy Shopify config opnieuw en installeer de app opnieuw.`,
+      );
+      return redirect(`/app/orders?${redirectParams}&error=${message}`);
+    }
+
     const result = await importOrders(admin, shop.id, start, end);
     return redirect(
       `/app/orders?${redirectParams}&imported=${result.imported}&failed=${result.failed}&start=${start.toISOString().slice(0, 10)}&end=${end.toISOString().slice(0, 10)}`,
