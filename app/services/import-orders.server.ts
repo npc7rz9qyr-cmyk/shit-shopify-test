@@ -8,7 +8,7 @@ type AdminGraphqlContext = {
 
 const ORDERS_QUERY = `#graphql
   query AccountingOrders($first: Int!, $after: String, $query: String) {
-    orders(first: $first, after: $after, sortKey: PROCESSED_AT, query: $query) {
+    orders(first: $first, after: $after, sortKey: CREATED_AT, query: $query) {
       pageInfo {
         hasNextPage
         endCursor
@@ -16,6 +16,7 @@ const ORDERS_QUERY = `#graphql
       nodes {
         id
         name
+        createdAt
         processedAt
         currencyCode
         currentSubtotalPriceSet { shopMoney { amount currencyCode } }
@@ -44,8 +45,8 @@ function shopifyDate(date: Date) {
 }
 
 function orderSearchQuery(startDate: Date, endDate?: Date) {
-  const parts = [`processed_at:>=${shopifyDate(startDate)}`];
-  if (endDate) parts.push(`processed_at:<=${shopifyDate(endDate)}`);
+  const parts = [`created_at:>=${shopifyDate(startDate)}`];
+  if (endDate) parts.push(`created_at:<=${shopifyDate(endDate)}`);
   return parts.join(" ");
 }
 
