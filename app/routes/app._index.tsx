@@ -48,6 +48,10 @@ function yearOptions(selectedYear: number) {
   return Array.from(years).sort((a, b) => b - a);
 }
 
+function positive(value: bigint) {
+  return value > 0n ? value : 0n;
+}
+
 const nativeButtonStyle: CSSProperties = {
   minHeight: "2.25rem",
   padding: "0 0.9rem",
@@ -64,6 +68,8 @@ const secondaryButtonStyle: CSSProperties = {
   background: "white",
   color: "#303030",
 };
+
+const zeroCents = "0";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -95,8 +101,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   ]);
 
+  const grossSales = totals._sum.grossCents || 0n;
   const salesVat = totals._sum.taxCents || 0n;
   const purchaseVat = expenseTotals._sum.vatCents || 0n;
+  const salesExVat = positive(grossSales - salesVat);
   const vatDue = salesVat - purchaseVat;
 
   return {
@@ -110,13 +118,114 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     periodLabel: quarterLabel(selectedYear, selectedQuarter),
     periodStart: start.toISOString().slice(0, 10),
     periodEnd: end.toISOString().slice(0, 10),
-    grossCents: (totals._sum.grossCents || 0n).toString(),
+    grossCents: grossSales.toString(),
+    salesExVatCents: salesExVat.toString(),
     taxCents: salesVat.toString(),
     refundCents: (totals._sum.refundCents || 0n).toString(),
     costNetCents: (expenseTotals._sum.netCents || 0n).toString(),
     costVatCents: purchaseVat.toString(),
     costTotalCents: (expenseTotals._sum.totalCents || 0n).toString(),
     vatDueCents: vatDue.toString(),
+    declarationRows: [
+      {
+        code: "1a",
+        label: "Leveringen/diensten belast met hoog tarief",
+        amountCents: salesExVat.toString(),
+        vatCents: salesVat.toString(),
+        note: "Automatisch gevuld met Shopify-omzet. Controleer of alles 21% is.",
+      },
+      {
+        code: "1b",
+        label: "Leveringen/diensten belast met laag tarief",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Vul handmatig aan als je 9%-producten verkoopt.",
+      },
+      {
+        code: "1c",
+        label: "Leveringen/diensten belast met overige tarieven, behalve 0%",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Meestal niet van toepassing voor een normale webshop.",
+      },
+      {
+        code: "1d",
+        label: "Privégebruik",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Alleen invullen indien van toepassing, vaak in Q4/eind-aangifte.",
+      },
+      {
+        code: "1e",
+        label: "Leveringen/diensten belast met 0% of niet bij jou belast",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Gebruik voor 0%-omzet/verlegde binnenlandse omzet indien van toepassing.",
+      },
+      {
+        code: "2a",
+        label: "Leveringen/diensten waarbij de btw naar jou is verlegd",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen bij facturen met ‘btw verlegd’.",
+      },
+      {
+        code: "3a",
+        label: "Leveringen naar landen buiten de EU",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen bij export buiten de EU.",
+      },
+      {
+        code: "3b",
+        label: "Leveringen naar of diensten in landen binnen de EU",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen bij B2B EU/ICP.",
+      },
+      {
+        code: "3c",
+        label: "Installatie/afstandsverkopen binnen de EU",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen als je geen OSS/eénloketsysteem gebruikt.",
+      },
+      {
+        code: "4a",
+        label: "Leveringen/diensten uit landen buiten de EU",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen bij buitenlandse diensten/invoer met verlegging.",
+      },
+      {
+        code: "4b",
+        label: "Leveringen/diensten uit landen binnen de EU",
+        amountCents: zeroCents,
+        vatCents: zeroCents,
+        note: "Handmatig invullen bij EU-inkopen/diensten met verlegde btw.",
+      },
+      {
+        code: "5a",
+        label: "Verschuldigde btw",
+        amountCents: zeroCents,
+        vatCents: salesVat.toString(),
+        note: "Totaal btw uit verkooprubrieken die nu automatisch bekend zijn.",
+      },
+      {
+        code: "5b",
+        label: "Voorbelasting",
+        amountCents: (expenseTotals._sum.netCents || 0n).toString(),
+        vatCents: purchaseVat.toString(),
+        note: "Btw op ingevoerde zakelijke kosten/inkopen.",
+      },
+      {
+        code: "Saldo",
+        label: "Te betalen / terug te vragen",
+        amountCents: zeroCents,
+        vatCents: vatDue.toString(),
+        note: "5a min 5b. Negatief bedrag betekent terug te vragen.",
+      },
+    ],
   };
 };
 
@@ -157,13 +266,44 @@ export default function Dashboard() {
           Periode: {new Date(data.periodStart).toLocaleDateString("nl-NL")} t/m {new Date(data.periodEnd).toLocaleDateString("nl-NL")}
         </s-paragraph>
         <s-stack direction="inline" gap="base">
-          <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Omzet na refunds</s-text><s-heading>{formatEuros(BigInt(data.grossCents))}</s-heading></s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Omzet excl. btw</s-text><s-heading>{formatEuros(BigInt(data.salesExVatCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Btw verkoop</s-text><s-heading>{formatEuros(BigInt(data.taxCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Refunds</s-text><s-heading>{formatEuros(BigInt(data.refundCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Kosten excl. btw</s-text><s-heading>{formatEuros(BigInt(data.costNetCents))}</s-heading></s-box>
-          <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Btw inkopen</s-text><s-heading>{formatEuros(BigInt(data.costVatCents))}</s-heading></s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Btw inkopen / 5b</s-text><s-heading>{formatEuros(BigInt(data.costVatCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Te betalen btw</s-text><s-heading>{formatEuros(BigInt(data.vatDueCents))}</s-heading></s-box>
         </s-stack>
+      </s-section>
+
+      <s-section heading={`BTW-aangifte overnemen ${data.periodLabel}`}>
+        <s-banner tone="warning">
+          Controleer dit altijd vóór indienen. De app zet alle geïmporteerde Shopify-omzet voorlopig onder 1a hoog tarief. Splits 9%, 0%, EU/OSS, export en verlegde btw handmatig als dat bij jou voorkomt.
+        </s-banner>
+
+        <div style={{ overflowX: "auto", marginTop: "1rem" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "58rem" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Rubriek</th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Omschrijving</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Omzet / waarde excl. btw</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Btw-bedrag</th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Opmerking</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.declarationRows.map((row) => (
+                <tr key={row.code}>
+                  <td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", fontWeight: 700 }}>{row.code}</td>
+                  <td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem" }}>{row.label}</td>
+                  <td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", textAlign: "right", whiteSpace: "nowrap" }}>{formatEuros(BigInt(row.amountCents))}</td>
+                  <td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", textAlign: "right", whiteSpace: "nowrap" }}>{formatEuros(BigInt(row.vatCents))}</td>
+                  <td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem" }}>{row.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </s-section>
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
