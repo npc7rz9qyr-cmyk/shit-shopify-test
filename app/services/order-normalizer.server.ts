@@ -23,7 +23,8 @@ type MoneyBag = {
 type GraphqlOrder = {
   id: string;
   name: string;
-  processedAt: string;
+  createdAt?: string | null;
+  processedAt?: string | null;
   currencyCode: string;
   currentSubtotalPriceSet?: MoneyBag;
   currentTotalTaxSet?: MoneyBag;
@@ -47,6 +48,10 @@ function bagAmount(bag?: MoneyBag): bigint {
   return moneyToCents(bag?.shopMoney?.amount);
 }
 
+function orderDate(createdAt?: string | null, processedAt?: string | null) {
+  return new Date(createdAt || processedAt || new Date().toISOString());
+}
+
 export function normalizeGraphqlOrder(order: GraphqlOrder): NormalizedOrder {
   const refunds = order.refunds || [];
   const refundCents = refunds.reduce(
@@ -66,7 +71,7 @@ export function normalizeGraphqlOrder(order: GraphqlOrder): NormalizedOrder {
   return {
     shopifyOrderId: order.id,
     orderNumber: order.name,
-    processedAt: new Date(order.processedAt),
+    processedAt: orderDate(order.createdAt, order.processedAt),
     currency: order.currencyCode,
     subtotalCents: bagAmount(order.currentSubtotalPriceSet),
     taxCents: bagAmount(order.currentTotalTaxSet),
@@ -118,9 +123,7 @@ export function normalizeWebhookOrder(order: WebhookOrder): NormalizedOrder {
   return {
     shopifyOrderId: `gid://shopify/Order/${order.id}`,
     orderNumber: order.name || String(order.order_number || order.id),
-    processedAt: new Date(
-      order.processed_at || order.created_at || new Date().toISOString(),
-    ),
+    processedAt: orderDate(order.created_at, order.processed_at),
     currency: order.currency || order.presentment_currency || "EUR",
     subtotalCents: moneyToCents(
       order.current_subtotal_price ?? order.subtotal_price,
