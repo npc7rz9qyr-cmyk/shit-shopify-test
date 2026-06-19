@@ -20,7 +20,7 @@ type Crop = {
 
 type ImageMode = "soft" | "balanced" | "hard";
 
-const DEFAULT_CROP: Crop = { top: 6, right: 6, bottom: 6, left: 6 };
+const DEFAULT_CROP: Crop = { top: 5, right: 5, bottom: 5, left: 5 };
 
 function centsToInput(value: bigint) {
   const negative = value < 0n;
@@ -114,55 +114,62 @@ function receiptScore(text: string) {
   return amounts * 3 + keywords * 2 + Math.min(4, Math.floor((letters + digits) / 80)) + lengthScore - garbage;
 }
 
-async function preprocessReceiptImage(file: File, crop: Crop, mode: ImageMode) {
+async function imageToCanvasSource(file: File) {
   const image = new Image();
   const objectUrl = URL.createObjectURL(file);
-
   try {
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
       image.onerror = () => reject(new Error("Afbeelding kon niet worden geladen"));
       image.src = objectUrl;
     });
-
-    const cropX = Math.round(image.width * crop.left / 100);
-    const cropY = Math.round(image.height * crop.top / 100);
-    const cropW = Math.max(100, Math.round(image.width * (100 - crop.left - crop.right) / 100));
-    const cropH = Math.max(100, Math.round(image.height * (100 - crop.top - crop.bottom) / 100));
-    const targetWidth = Math.min(Math.max(cropW, 1600), 2600);
-    const scale = targetWidth / cropW;
-    const targetHeight = Math.round(cropH * scale);
-
-    const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return file;
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(image, cropX, cropY, cropW, cropH, 0, 0, targetWidth, targetHeight);
-
-    const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
-    const pixels = imageData.data;
-    const contrast = mode === "soft" ? 1.25 : mode === "balanced" ? 1.55 : 1.85;
-    const dark = mode === "soft" ? 80 : mode === "balanced" ? 105 : 130;
-    const light = mode === "soft" ? 210 : mode === "balanced" ? 170 : 155;
-
-    for (let index = 0; index < pixels.length; index += 4) {
-      const gray = pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
-      const contrasted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
-      const output = contrasted > light ? 255 : contrasted < dark ? 0 : contrasted;
-      pixels[index] = output;
-      pixels[index + 1] = output;
-      pixels[index + 2] = output;
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-    return canvas.toDataURL("image/png");
+    return image;
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+async function preprocessReceiptImage(file: File, crop: Crop, mode: ImageMode) {
+  const image = await imageToCanvasSource(file);
+  const safeLeft = Math.min(crop.left, 45);
+  const safeRight = Math.min(crop.right, 45);
+  const safeTop = Math.min(crop.top, 45);
+  const safeBottom = Math.min(crop.bottom, 45);
+  const cropX = Math.round(image.width * safeLeft / 100);
+  const cropY = Math.round(image.height * safeTop / 100);
+  const cropW = Math.max(120, Math.round(image.width * (100 - safeLeft - safeRight) / 100));
+  const cropH = Math.max(120, Math.round(image.height * (100 - safeTop - safeBottom) / 100));
+  const targetWidth = Math.min(Math.max(cropW, 1600), 2600);
+  const scale = targetWidth / cropW;
+  const targetHeight = Math.round(cropH * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return file;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, cropX, cropY, cropW, cropH, 0, 0, targetWidth, targetHeight);
+
+  const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+  const pixels = imageData.data;
+  const contrast = mode === "soft" ? 1.18 : mode === "balanced" ? 1.45 : 1.75;
+  const dark = mode === "soft" ? 70 : mode === "balanced" ? 95 : 120;
+  const light = mode === "soft" ? 220 : mode === "balanced" ? 178 : 160;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const gray = pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
+    const contrasted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
+    const output = contrasted > light ? 255 : contrasted < dark ? 0 : contrasted;
+    pixels[index] = output;
+    pixels[index + 1] = output;
+    pixels[index + 2] = output;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
 }
 
 function setFormValue(name: string, value?: string) {
@@ -196,52 +203,56 @@ export function ReceiptOcrScanner() {
   const [previewUrl, setPreviewUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [crop, setCrop] = useState<Crop>(DEFAULT_CROP);
+  const [isScanning, setIsScanning] = useState(false);
 
   async function scanFile(targetFile: File, targetCrop = crop) {
-    setStatus("Bon wordt uitgesneden en in meerdere OCR-modi gelezen...");
-    const Tesseract = await import("tesseract.js");
-    const modes: ImageMode[] = ["balanced", "soft", "hard"];
-    let bestText = "";
-    let bestScore = -999;
-
-    for (const mode of modes) {
-      const processedImage = await preprocessReceiptImage(targetFile, targetCrop, mode);
-      const result = await Tesseract.recognize(processedImage, "nld+eng", {
-        logger: (message: { status?: string; progress?: number }) => {
-          if (!message.status) return;
-          const progress = message.progress ? ` ${Math.round(message.progress * 100)}%` : "";
-          setStatus(`${mode}: ${message.status}${progress}`);
-        },
-        tessedit_pageseg_mode: "6",
-        preserve_interword_spaces: "1",
-      } as any);
-      const text = result.data.text || "";
-      const score = receiptScore(text);
-      if (score > bestScore) {
-        bestScore = score;
-        bestText = text;
-      }
-    }
-
-    if (bestScore < 8) {
-      setStatus(`Te veel ruis. Score ${bestScore}. Verklein het scanvlak zodat alleen de bon erin valt en klik op 'Scan uitsnede opnieuw'.`);
-      return;
-    }
-
-    applyResult(bestText);
-    setStatus(`Bon is uitgelezen met score ${bestScore}. Controleer de velden en klik op Kosten boeken.`);
-  }
-
-  async function handleFile(nextFile?: File) {
-    if (!nextFile) return;
-    setFile(nextFile);
-    setPreviewUrl(URL.createObjectURL(nextFile));
-    setCrop(DEFAULT_CROP);
+    if (isScanning) return;
+    setIsScanning(true);
+    setStatus("Bon wordt uitgesneden en gelezen...");
     try {
-      await scanFile(nextFile, DEFAULT_CROP);
+      const Tesseract = await import("tesseract.js");
+      const modes: ImageMode[] = ["balanced", "soft", "hard"];
+      let bestText = "";
+      let bestScore = -999;
+
+      for (const mode of modes) {
+        const processedImage = await preprocessReceiptImage(targetFile, targetCrop, mode);
+        const result = await Tesseract.recognize(processedImage, "nld+eng", {
+          logger: (message: { status?: string; progress?: number }) => {
+            if (!message.status) return;
+            const progress = message.progress ? ` ${Math.round(message.progress * 100)}%` : "";
+            setStatus(`${mode}: ${message.status}${progress}`);
+          },
+        });
+        const text = result.data.text || "";
+        const score = receiptScore(text);
+        if (score > bestScore) {
+          bestScore = score;
+          bestText = text;
+        }
+      }
+
+      if (bestScore < 8) {
+        setStatus(`Te veel ruis. Score ${bestScore}. Zet het kader strakker om alleen de bon en scan opnieuw.`);
+        return;
+      }
+
+      applyResult(bestText);
+      setStatus(`Bon is uitgelezen met score ${bestScore}. Controleer de velden en klik op Kosten boeken.`);
     } catch (error) {
       setStatus(`OCR mislukt: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsScanning(false);
     }
+  }
+
+  function handleFile(nextFile?: File) {
+    if (!nextFile) return;
+    setFile(nextFile);
+    setCrop(DEFAULT_CROP);
+    setStatus("Foto geladen. Zet het paarse kader strak om de bon en klik daarna op Scan bon.");
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(nextFile));
   }
 
   const cropStyle = {
@@ -252,8 +263,12 @@ export function ReceiptOcrScanner() {
     left: `${crop.left}%`,
     border: "3px solid #4f46e5",
     borderRadius: "0.75rem",
-    boxShadow: "0 0 0 9999px rgba(15, 23, 42, 0.45)",
+    boxShadow: "0 0 0 9999px rgba(15, 23, 42, 0.42)",
     pointerEvents: "none" as const,
+  };
+
+  const updateCrop = (key: keyof Crop, value: number) => {
+    setCrop((current) => ({ ...current, [key]: Math.max(0, Math.min(45, value)) }));
   };
 
   return (
@@ -262,9 +277,9 @@ export function ReceiptOcrScanner() {
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(event) => handleFile(event.currentTarget.files?.[0])} />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-        <button type="button" style={primaryButton} onClick={() => cameraInputRef.current?.click()}>Foto maken</button>
-        <button type="button" style={secondaryButton} onClick={() => uploadInputRef.current?.click()}>Bon uploaden</button>
-        {file ? <button type="button" style={secondaryButton} onClick={() => scanFile(file)}>Scan uitsnede opnieuw</button> : null}
+        <button type="button" style={primaryButton} onClick={() => cameraInputRef.current?.click()} disabled={isScanning}>Foto maken</button>
+        <button type="button" style={secondaryButton} onClick={() => uploadInputRef.current?.click()} disabled={isScanning}>Bon uploaden</button>
+        {file ? <button type="button" style={primaryButton} onClick={() => scanFile(file)} disabled={isScanning}>{isScanning ? "Scannen..." : "Scan bon"}</button> : null}
       </div>
 
       {status ? <s-banner tone="warning">{status}</s-banner> : null}
@@ -276,14 +291,14 @@ export function ReceiptOcrScanner() {
             <div style={cropStyle} />
           </div>
           <div style={{ display: "grid", gap: "0.5rem", maxWidth: "42rem" }}>
-            <label>Scanvlak boven: {crop.top}%</label>
-            <input type="range" min="0" max="40" value={crop.top} onChange={(event) => setCrop((current) => ({ ...current, top: Number(event.currentTarget.value) }))} />
-            <label>Scanvlak onder: {crop.bottom}%</label>
-            <input type="range" min="0" max="40" value={crop.bottom} onChange={(event) => setCrop((current) => ({ ...current, bottom: Number(event.currentTarget.value) }))} />
-            <label>Scanvlak links: {crop.left}%</label>
-            <input type="range" min="0" max="40" value={crop.left} onChange={(event) => setCrop((current) => ({ ...current, left: Number(event.currentTarget.value) }))} />
-            <label>Scanvlak rechts: {crop.right}%</label>
-            <input type="range" min="0" max="40" value={crop.right} onChange={(event) => setCrop((current) => ({ ...current, right: Number(event.currentTarget.value) }))} />
+            <label>Boven uitsnijden: {crop.top}%</label>
+            <input type="range" min="0" max="45" value={crop.top} disabled={isScanning} onChange={(event) => updateCrop("top", Number(event.currentTarget.value))} />
+            <label>Onder uitsnijden: {crop.bottom}%</label>
+            <input type="range" min="0" max="45" value={crop.bottom} disabled={isScanning} onChange={(event) => updateCrop("bottom", Number(event.currentTarget.value))} />
+            <label>Links uitsnijden: {crop.left}%</label>
+            <input type="range" min="0" max="45" value={crop.left} disabled={isScanning} onChange={(event) => updateCrop("left", Number(event.currentTarget.value))} />
+            <label>Rechts uitsnijden: {crop.right}%</label>
+            <input type="range" min="0" max="45" value={crop.right} disabled={isScanning} onChange={(event) => updateCrop("right", Number(event.currentTarget.value))} />
           </div>
         </div>
       ) : null}
