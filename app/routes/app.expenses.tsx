@@ -6,6 +6,7 @@ import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatEuros, moneyToCents } from "../services/money";
 import { postExpense } from "../services/expenses.server";
+import { readReceiptFromImageFile } from "../services/receipt-ocr.server";
 
 type ScanResult = {
   date?: string;
@@ -84,6 +85,28 @@ function parseReceiptText(text: string): ScanResult {
   return result;
 }
 
+function receiptParams(receipt: {
+  date?: string;
+  supplier?: string;
+  description?: string;
+  invoiceNumber?: string;
+  net?: string;
+  vat?: string;
+  total?: string;
+  vatRate?: string;
+}) {
+  const params = new URLSearchParams({ scanned: "1" });
+  for (const [key, value] of Object.entries(receipt)) {
+    if (value) params.set(key, value);
+  }
+  return params;
+}
+
+function pickReceiptFile(form: FormData) {
+  const candidates = [form.get("receiptFileCamera"), form.get("receiptFileUpload"), form.get("receiptFile")];
+  return candidates.find((candidate): candidate is File => candidate instanceof File && candidate.size > 0);
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
@@ -128,14 +151,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "save");
 
+  if (intent === "ai-scan") {
+    try {
+      const file = pickReceiptFile(form);
+      if (!file) throw new Error("Geen bonfoto ontvangen.");
+      const receipt = await readReceiptFromImageFile(file);
+      return redirect(`/app/expenses?${receiptParams(receipt).toString()}`);
+    } catch (error) {
+      const message = encodeURIComponent(error instanceof Error ? error.message : String(error));
+      return redirect(`/app/expenses?error=${message}`);
+    }
+  }
+
   if (intent === "scan") {
     const text = String(form.get("receiptText") || "");
     const parsed = parseReceiptText(text);
-    const params = new URLSearchParams({ scanned: "1" });
-    for (const [key, value] of Object.entries(parsed)) {
-      if (value) params.set(key, value);
-    }
-    return redirect(`/app/expenses?${params.toString()}`);
+    return redirect(`/app/expenses?${receiptParams(parsed).toString()}`);
   }
 
   const date = new Date(`${String(form.get("date") || "")}T12:00:00.000Z`);
@@ -205,10 +236,10 @@ export default function ExpensesPage() {
     <s-page heading="Kosten">
       {error ? <s-section><s-banner tone="critical">Kosten boeken mislukt: {error}</s-banner></s-section> : null}
       {saved ? <s-section><s-banner tone="success">Kosten zijn geboekt.</s-banner></s-section> : null}
-      {scanned ? <s-section><s-banner tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
+      {scanned ? <s-section><s-banner tone="warning">Bon is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
 
       <s-section heading="Bon/factuur scanner">
-        <s-paragraph>Maak direct een foto of upload een bon. De app leest de bon met OCR en vult leverancier, datum, totaal, btw en omschrijving alvast in.</s-paragraph>
+        <s-paragraph>Maak direct een foto of upload een bon. De app leest de bon met AI en vult leverancier, datum, totaal, btw en omschrijving alvast in.</s-paragraph>
         <ReceiptOcrScanner />
         <Form method="post">
           <input type="hidden" name="intent" value="scan" />
