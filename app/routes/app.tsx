@@ -14,9 +14,30 @@ import "../styles.css";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   await ensureShop(session.shop, admin);
+
+  let shopName = session.shop.replace(".myshopify.com", "");
+  try {
+    const response = await admin.graphql(`#graphql
+      query ShopBrandName {
+        shop { name }
+      }
+    `);
+    const data = await response.json();
+    shopName = data?.data?.shop?.name || shopName;
+  } catch {
+    shopName = session.shop.replace(".myshopify.com", "");
+  }
+
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop: session.shop,
+    shopName,
+    shopInitials: shopName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part: string) => part[0]?.toUpperCase())
+      .join("") || "S",
   };
 };
 
@@ -32,7 +53,7 @@ const navigationItems = [
 ] as const;
 
 export default function AppLayout() {
-  const { apiKey, shop } = useLoaderData<typeof loader>();
+  const { apiKey, shop, shopName, shopInitials } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -40,9 +61,9 @@ export default function AppLayout() {
         <aside className="modern-sidebar">
           <div className="modern-brand">
             <div className="brand-row">
-              <div className="brand-logo">B</div>
+              <div className="brand-logo" aria-label="Winkel logo">{shopInitials}</div>
               <div>
-                <div className="brand-name">Boekhouder</div>
+                <div className="brand-name">{shopName}</div>
                 <div className="brand-desc">Shopify btw & administratie</div>
               </div>
             </div>
