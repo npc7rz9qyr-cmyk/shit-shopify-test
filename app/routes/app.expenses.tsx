@@ -35,31 +35,20 @@ function parseAmount(value: FormDataEntryValue | null) {
 }
 
 function parseReceiptText(text: string): ScanResult {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const lower = text.toLowerCase();
   const result: ScanResult = {};
 
   const isoDate = text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
   const nlDate = text.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})\b/);
-  if (isoDate) {
-    result.date = `${isoDate[1]}-${isoDate[2].padStart(2, "0")}-${isoDate[3].padStart(2, "0")}`;
-  } else if (nlDate) {
-    result.date = `${nlDate[3]}-${nlDate[2].padStart(2, "0")}-${nlDate[1].padStart(2, "0")}`;
-  }
+  if (isoDate) result.date = `${isoDate[1]}-${isoDate[2].padStart(2, "0")}-${isoDate[3].padStart(2, "0")}`;
+  else if (nlDate) result.date = `${nlDate[3]}-${nlDate[2].padStart(2, "0")}-${nlDate[1].padStart(2, "0")}`;
 
   const invoiceMatch = text.match(/(?:factuur|invoice|bon|receipt|nr\.?|nummer)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-_/]{2,})/i);
   if (invoiceMatch) result.invoiceNumber = invoiceMatch[1];
 
   const amountPattern = /(-?\d{1,6}(?:[.,]\d{2}))/g;
-  const amounts = Array.from(text.matchAll(amountPattern)).map((match) => ({
-    raw: match[1],
-    cents: moneyToCents(match[1].replace(",", ".")),
-    index: match.index || 0,
-  }));
-
+  const amounts = Array.from(text.matchAll(amountPattern)).map((match) => moneyToCents(match[1].replace(",", ".")));
   const totalLine = lines.find((line) => /totaal|total|te betalen|amount due|paid|voldaan|pin/i.test(line));
   const vatLine = lines.find((line) => /btw|vat|tax/i.test(line));
   const netLine = lines.find((line) => /excl|netto|subtotal|subtotaal/i.test(line));
@@ -70,14 +59,13 @@ function parseReceiptText(text: string): ScanResult {
     return found.length ? moneyToCents(found[found.length - 1][1].replace(",", ".")) : undefined;
   };
 
-  const total = lastAmountInLine(totalLine) ?? amounts.reduce((max, amount) => amount.cents > max ? amount.cents : max, 0n);
+  const total = lastAmountInLine(totalLine) ?? amounts.reduce((max, amount) => amount > max ? amount : max, 0n);
   const vat = lastAmountInLine(vatLine) ?? (lower.includes("21%") ? calculateVatFromTotal(total, 21) : lower.includes("9%") ? calculateVatFromTotal(total, 9) : 0n);
   const net = lastAmountInLine(netLine) ?? (total > 0n ? total - vat : 0n);
 
   if (total > 0n) result.total = centsToInput(total);
   if (vat >= 0n) result.vat = centsToInput(vat);
   if (net >= 0n) result.net = centsToInput(net);
-
   result.supplier = lines.find((line) => !/factuur|invoice|bon|receipt|datum|date|btw|vat|tax|totaal|total|kvk|iban|tel|www|@/i.test(line)) || lines[0] || "";
   result.description = "Bon/factuur";
 
@@ -86,10 +74,45 @@ function parseReceiptText(text: string): ScanResult {
 
 function receiptParams(receipt: ScanResult) {
   const params = new URLSearchParams({ scanned: "1" });
-  for (const [key, value] of Object.entries(receipt)) {
-    if (value) params.set(key, value);
-  }
+  for (const [key, value] of Object.entries(receipt)) if (value) params.set(key, value);
   return params;
+}
+
+function parseExpenseForm(form: FormData) {
+  const date = new Date(`${String(form.get("date") || "")}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) throw new Error("Ongeldige datum");
+
+  const totalCents = parseAmount(form.get("total"));
+  const vatRate = Number(form.get("vatRate") || "21");
+  let vatCents = parseAmount(form.get("vat"));
+  let netCents = parseAmount(form.get("net"));
+
+  if (totalCents <= 0n) throw new Error("Totaal betaald is verplicht");
+  if (netCents === 0n && vatCents === 0n) {
+    vatCents = calculateVatFromTotal(totalCents, vatRate);
+    netCents = totalCents - vatCents;
+  } else if (netCents === 0n) {
+    netCents = totalCents - vatCents;
+  } else if (vatCents === 0n) {
+    vatCents = totalCents - netCents;
+  }
+
+  return {
+    date,
+    supplier: String(form.get("supplier") || ""),
+    description: String(form.get("description") || ""),
+    invoiceNumber: String(form.get("invoiceNumber") || ""),
+    netCents,
+    vatCents,
+    totalCents,
+  };
+}
+
+async function deleteExpenseWithEntry(shopId: string, expenseId: string) {
+  const expense = await prisma.expense.findFirst({ where: { id: expenseId, shopId } });
+  if (!expense) throw new Error("Kostenpost niet gevonden");
+  await prisma.expense.delete({ where: { id: expense.id } });
+  await prisma.journalEntry.delete({ where: { id: expense.journalEntryId } });
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -105,6 +128,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     saved: url.searchParams.get("saved") === "1",
+    updated: url.searchParams.get("updated") === "1",
+    deleted: url.searchParams.get("deleted") === "1",
     scanned: url.searchParams.get("scanned") === "1",
     error: url.searchParams.get("error"),
     defaults: {
@@ -118,10 +143,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     expenses: expenses.map((expense) => ({
       id: expense.id,
-      date: expense.date.toISOString(),
+      date: expense.date.toISOString().slice(0, 10),
       supplier: expense.supplier,
       description: expense.description,
-      invoiceNumber: expense.invoiceNumber,
+      invoiceNumber: expense.invoiceNumber || "",
+      net: centsToInput(expense.netCents),
+      vat: centsToInput(expense.vatCents),
+      total: centsToInput(expense.totalCents),
       netCents: expense.netCents.toString(),
       totalCents: expense.totalCents.toString(),
       vatCents: expense.vatCents.toString(),
@@ -136,60 +164,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "save");
 
-  if (intent === "scan") {
-    const text = String(form.get("receiptText") || "");
-    const parsed = parseReceiptText(text);
-    return redirect(`/app/expenses?${receiptParams(parsed).toString()}`);
-  }
-
-  const date = new Date(`${String(form.get("date") || "")}T12:00:00.000Z`);
-
-  if (Number.isNaN(date.getTime())) {
-    return redirect(`/app/expenses?error=${encodeURIComponent("Ongeldige datum")}`);
-  }
-
   try {
-    const totalCents = parseAmount(form.get("total"));
-    const vatRate = Number(form.get("vatRate") || "21");
-    let vatCents = parseAmount(form.get("vat"));
-    let netCents = parseAmount(form.get("net"));
-
-    if (totalCents <= 0n) throw new Error("Totaal betaald is verplicht");
-
-    if (netCents === 0n && vatCents === 0n) {
-      vatCents = calculateVatFromTotal(totalCents, vatRate);
-      netCents = totalCents - vatCents;
-    } else if (netCents === 0n) {
-      netCents = totalCents - vatCents;
-    } else if (vatCents === 0n) {
-      vatCents = totalCents - netCents;
+    if (intent === "scan") {
+      const parsed = parseReceiptText(String(form.get("receiptText") || ""));
+      return redirect(`/app/expenses?${receiptParams(parsed).toString()}`);
     }
 
-    await postExpense(shop.id, {
-      date,
-      supplier: String(form.get("supplier") || ""),
-      description: String(form.get("description") || ""),
-      invoiceNumber: String(form.get("invoiceNumber") || ""),
-      netCents,
-      vatCents,
-      totalCents,
-    });
+    if (intent === "delete") {
+      await deleteExpenseWithEntry(shop.id, String(form.get("expenseId") || ""));
+      return redirect("/app/expenses?deleted=1");
+    }
+
+    if (intent === "update") {
+      const expenseId = String(form.get("expenseId") || "");
+      const data = parseExpenseForm(form);
+      await deleteExpenseWithEntry(shop.id, expenseId);
+      await postExpense(shop.id, data);
+      return redirect("/app/expenses?updated=1");
+    }
+
+    await postExpense(shop.id, parseExpenseForm(form));
+    return redirect("/app/expenses?saved=1");
   } catch (error) {
     const message = encodeURIComponent(error instanceof Error ? error.message : String(error));
     return redirect(`/app/expenses?error=${message}`);
   }
-
-  return redirect("/app/expenses?saved=1");
 };
 
-type ExpenseFieldProps = {
-  id: string;
-  label: string;
-  type?: "text" | "date" | "number";
-  defaultValue?: string;
-  step?: string;
-  required?: boolean;
-};
+type ExpenseFieldProps = { id: string; label: string; type?: "text" | "date" | "number"; defaultValue?: string; step?: string; required?: boolean; };
 
 function ExpenseField({ id, label, type = "text", defaultValue, step, required = false }: ExpenseFieldProps) {
   return (
@@ -201,23 +203,27 @@ function ExpenseField({ id, label, type = "text", defaultValue, step, required =
 }
 
 const buttonStyle = { minHeight: "2.25rem", padding: "0 0.9rem", border: "1px solid #303030", borderRadius: "0.5rem", background: "#303030", color: "white", fontWeight: 600, cursor: "pointer" };
+const lightButtonStyle = { ...buttonStyle, background: "white", color: "#303030" };
+const dangerButtonStyle = { ...buttonStyle, background: "#b42318", borderColor: "#b42318" };
 
 export default function ExpensesPage() {
-  const { expenses, defaults, saved, scanned, error } = useLoaderData<typeof loader>();
+  const { expenses, defaults, saved, updated, deleted, scanned, error } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading="Kosten">
       {error ? <s-section><s-banner tone="critical">Kosten boeken mislukt: {error}</s-banner></s-section> : null}
       {saved ? <s-section><s-banner tone="success">Kosten zijn geboekt.</s-banner></s-section> : null}
+      {updated ? <s-section><s-banner tone="success">Kostenpost is gewijzigd.</s-banner></s-section> : null}
+      {deleted ? <s-section><s-banner tone="success">Kostenpost is verwijderd.</s-banner></s-section> : null}
       {scanned ? <s-section><s-banner tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
 
       <s-section heading="Bon/factuur scanner">
-        <s-paragraph>Upload een bon of maak een foto. De gratis scanner leest de tekst lokaal in je browser. Controleer altijd de velden voordat je boekt.</s-paragraph>
+        <s-paragraph>Gebruik Live Text of Google Lens op je telefoon, plak de tekst hieronder en klik op Bontekst uitlezen.</s-paragraph>
         <ReceiptOcrScanner />
         <Form method="post">
           <input type="hidden" name="intent" value="scan" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem" }}>
-            <textarea name="receiptText" rows={8} placeholder="Plak hier handmatig de tekst van je bon of gebruik eerst de gratis OCR hierboven..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
+            <textarea name="receiptText" rows={8} placeholder="Plak hier de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
             <div><button type="submit" style={buttonStyle}>Bontekst uitlezen</button></div>
           </div>
         </Form>
@@ -234,9 +240,7 @@ export default function ExpensesPage() {
             <div style={{ display: "grid", gap: "0.35rem" }}>
               <label htmlFor="vatRate" style={{ fontWeight: 600 }}>Btw-percentage voor automatische berekening</label>
               <select id="vatRate" name="vatRate" defaultValue="21" style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", background: "white" }}>
-                <option value="21">21%</option>
-                <option value="9">9%</option>
-                <option value="0">0% / geen btw</option>
+                <option value="21">21%</option><option value="9">9%</option><option value="0">0% / geen btw</option>
               </select>
             </div>
             <ExpenseField id="net" label="Bedrag exclusief btw" type="number" step="0.01" defaultValue={defaults.net} />
@@ -249,33 +253,36 @@ export default function ExpensesPage() {
       </s-section>
 
       <s-section heading="Recente kosten">
-        {expenses.length === 0 ? (
-          <s-paragraph>Nog geen kosten geboekt.</s-paragraph>
-        ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Datum</s-table-header>
-              <s-table-header>Leverancier</s-table-header>
-              <s-table-header>Omschrijving</s-table-header>
-              <s-table-header>Excl.</s-table-header>
-              <s-table-header>Btw</s-table-header>
-              <s-table-header>Totaal</s-table-header>
-              <s-table-header>Boeking</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {expenses.map((expense) => (
-                <s-table-row key={expense.id}>
-                  <s-table-cell>{new Date(expense.date).toLocaleDateString("nl-NL")}</s-table-cell>
-                  <s-table-cell>{expense.supplier}</s-table-cell>
-                  <s-table-cell>{expense.description}</s-table-cell>
-                  <s-table-cell>{formatEuros(BigInt(expense.netCents))}</s-table-cell>
-                  <s-table-cell>{formatEuros(BigInt(expense.vatCents))}</s-table-cell>
-                  <s-table-cell>{formatEuros(BigInt(expense.totalCents))}</s-table-cell>
-                  <s-table-cell>#{expense.entryNumber}</s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+        {expenses.length === 0 ? <s-paragraph>Nog geen kosten geboekt.</s-paragraph> : (
+          <div style={{ display: "grid", gap: "1rem" }}>
+            {expenses.map((expense) => (
+              <details key={expense.id} style={{ border: "1px solid #e1e3e5", borderRadius: "1rem", padding: "1rem", background: "white" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>{expense.date} · {expense.supplier} · {formatEuros(BigInt(expense.totalCents))} · boeking #{expense.entryNumber}</summary>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="update" />
+                  <input type="hidden" name="expenseId" value={expense.id} />
+                  <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem", maxWidth: "34rem" }}>
+                    <ExpenseField id="date" label="Datum" type="date" defaultValue={expense.date} required />
+                    <ExpenseField id="supplier" label="Leverancier" defaultValue={expense.supplier} required />
+                    <ExpenseField id="description" label="Omschrijving" defaultValue={expense.description} required />
+                    <ExpenseField id="invoiceNumber" label="Factuurnummer / bonnummer" defaultValue={expense.invoiceNumber} />
+                    <ExpenseField id="net" label="Bedrag exclusief btw" type="number" step="0.01" defaultValue={expense.net} />
+                    <ExpenseField id="vat" label="Btw" type="number" step="0.01" defaultValue={expense.vat} />
+                    <ExpenseField id="total" label="Totaal betaald" type="number" step="0.01" defaultValue={expense.total} required />
+                    <input type="hidden" name="vatRate" value="21" />
+                    <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                      <button type="submit" style={lightButtonStyle}>Wijzig opslaan</button>
+                    </div>
+                  </div>
+                </Form>
+                <Form method="post" onSubmit={(event) => { if (!confirm("Weet je zeker dat je deze kostenpost wilt verwijderen?")) event.preventDefault(); }}>
+                  <input type="hidden" name="intent" value="delete" />
+                  <input type="hidden" name="expenseId" value={expense.id} />
+                  <div style={{ marginTop: "0.75rem" }}><button type="submit" style={dangerButtonStyle}>Verwijderen</button></div>
+                </Form>
+              </details>
+            ))}
+          </div>
         )}
       </s-section>
     </s-page>
