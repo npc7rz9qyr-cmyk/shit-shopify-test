@@ -6,7 +6,6 @@ import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatEuros, moneyToCents } from "../services/money";
 import { postExpense } from "../services/expenses.server";
-import { readReceiptFromImageFile } from "../services/receipt-ocr.server";
 
 type ScanResult = {
   date?: string;
@@ -61,7 +60,7 @@ function parseReceiptText(text: string): ScanResult {
     index: match.index || 0,
   }));
 
-  const totalLine = lines.find((line) => /totaal|total|te betalen|amount due|paid/i.test(line));
+  const totalLine = lines.find((line) => /totaal|total|te betalen|amount due|paid|voldaan|pin/i.test(line));
   const vatLine = lines.find((line) => /btw|vat|tax/i.test(line));
   const netLine = lines.find((line) => /excl|netto|subtotal|subtotaal/i.test(line));
 
@@ -79,32 +78,18 @@ function parseReceiptText(text: string): ScanResult {
   if (vat >= 0n) result.vat = centsToInput(vat);
   if (net >= 0n) result.net = centsToInput(net);
 
-  result.supplier = lines.find((line) => !/factuur|invoice|bon|receipt|datum|date|btw|vat|tax|totaal|total/i.test(line)) || lines[0] || "";
+  result.supplier = lines.find((line) => !/factuur|invoice|bon|receipt|datum|date|btw|vat|tax|totaal|total|kvk|iban|tel|www|@/i.test(line)) || lines[0] || "";
   result.description = "Bon/factuur";
 
   return result;
 }
 
-function receiptParams(receipt: {
-  date?: string;
-  supplier?: string;
-  description?: string;
-  invoiceNumber?: string;
-  net?: string;
-  vat?: string;
-  total?: string;
-  vatRate?: string;
-}) {
+function receiptParams(receipt: ScanResult) {
   const params = new URLSearchParams({ scanned: "1" });
   for (const [key, value] of Object.entries(receipt)) {
     if (value) params.set(key, value);
   }
   return params;
-}
-
-function pickReceiptFile(form: FormData) {
-  const candidates = [form.get("receiptFileCamera"), form.get("receiptFileUpload"), form.get("receiptFile")];
-  return candidates.find((candidate): candidate is File => candidate instanceof File && candidate.size > 0);
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -150,18 +135,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shop = await ensureShop(session.shop, admin);
   const form = await request.formData();
   const intent = String(form.get("intent") || "save");
-
-  if (intent === "ai-scan") {
-    try {
-      const file = pickReceiptFile(form);
-      if (!file) throw new Error("Geen bonfoto ontvangen.");
-      const receipt = await readReceiptFromImageFile(file);
-      return redirect(`/app/expenses?${receiptParams(receipt).toString()}`);
-    } catch (error) {
-      const message = encodeURIComponent(error instanceof Error ? error.message : String(error));
-      return redirect(`/app/expenses?error=${message}`);
-    }
-  }
 
   if (intent === "scan") {
     const text = String(form.get("receiptText") || "");
@@ -236,15 +209,15 @@ export default function ExpensesPage() {
     <s-page heading="Kosten">
       {error ? <s-section><s-banner tone="critical">Kosten boeken mislukt: {error}</s-banner></s-section> : null}
       {saved ? <s-section><s-banner tone="success">Kosten zijn geboekt.</s-banner></s-section> : null}
-      {scanned ? <s-section><s-banner tone="warning">Bon is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
+      {scanned ? <s-section><s-banner tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
 
       <s-section heading="Bon/factuur scanner">
-        <s-paragraph>Maak direct een foto of upload een bon. De app leest de bon met AI en vult leverancier, datum, totaal, btw en omschrijving alvast in.</s-paragraph>
+        <s-paragraph>Upload een bon of maak een foto. De gratis scanner leest de tekst lokaal in je browser. Controleer altijd de velden voordat je boekt.</s-paragraph>
         <ReceiptOcrScanner />
         <Form method="post">
           <input type="hidden" name="intent" value="scan" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem" }}>
-            <textarea name="receiptText" rows={8} placeholder="Of plak hier handmatig de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
+            <textarea name="receiptText" rows={8} placeholder="Plak hier handmatig de tekst van je bon of gebruik eerst de gratis OCR hierboven..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
             <div><button type="submit" style={buttonStyle}>Bontekst uitlezen</button></div>
           </div>
         </Form>
