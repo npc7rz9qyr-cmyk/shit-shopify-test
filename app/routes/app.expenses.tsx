@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useLoaderData } from "react-router";
 import { ReceiptOcrScanner } from "../components/ReceiptOcrScanner";
@@ -111,8 +112,10 @@ function parseExpenseForm(form: FormData) {
 async function deleteExpenseWithEntry(shopId: string, expenseId: string) {
   const expense = await prisma.expense.findFirst({ where: { id: expenseId, shopId } });
   if (!expense) throw new Error("Kostenpost niet gevonden");
-  await prisma.expense.delete({ where: { id: expense.id } });
-  await prisma.journalEntry.delete({ where: { id: expense.journalEntryId } });
+  await prisma.$transaction([
+    prisma.expense.delete({ where: { id: expense.id } }),
+    prisma.journalEntry.delete({ where: { id: expense.journalEntryId } }),
+  ]);
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -209,6 +212,19 @@ const dangerButtonStyle = { ...buttonStyle, background: "#b42318", borderColor: 
 export default function ExpensesPage() {
   const { expenses, defaults, saved, updated, deleted, scanned, error } = useLoaderData<typeof loader>();
 
+  useEffect(() => {
+    const key = "expenses-scroll-y";
+    const savedY = sessionStorage.getItem(key);
+    if (savedY) {
+      requestAnimationFrame(() => window.scrollTo({ top: Number(savedY), behavior: "auto" }));
+      sessionStorage.removeItem(key);
+    }
+
+    const saveScroll = () => sessionStorage.setItem(key, String(window.scrollY));
+    document.addEventListener("submit", saveScroll, true);
+    return () => document.removeEventListener("submit", saveScroll, true);
+  }, []);
+
   return (
     <s-page heading="Kosten">
       {error ? <s-section><s-banner tone="critical">Kosten boeken mislukt: {error}</s-banner></s-section> : null}
@@ -275,7 +291,7 @@ export default function ExpensesPage() {
                     </div>
                   </div>
                 </Form>
-                <Form method="post" onSubmit={(event) => { if (!confirm("Weet je zeker dat je deze kostenpost wilt verwijderen?")) event.preventDefault(); }}>
+                <Form method="post">
                   <input type="hidden" name="intent" value="delete" />
                   <input type="hidden" name="expenseId" value={expense.id} />
                   <div style={{ marginTop: "0.75rem" }}><button type="submit" style={dangerButtonStyle}>Verwijderen</button></div>
