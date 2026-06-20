@@ -74,9 +74,13 @@ function parseReceiptText(text: string): ScanResult {
 }
 
 function receiptParams(receipt: ScanResult) {
-  const params = new URLSearchParams({ scanned: "1" });
+  const params = new URLSearchParams({ scanned: "1", notice: "scan" });
   for (const [key, value] of Object.entries(receipt)) if (value) params.set(key, value);
   return params;
+}
+
+function withNotice(path: string, notice: string) {
+  return `${path}${path.includes("?") ? "&" : "?"}notice=${notice}`;
 }
 
 function parseExpenseForm(form: FormData) {
@@ -130,6 +134,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return {
+    notice: url.searchParams.get("notice") || "",
     saved: url.searchParams.get("saved") === "1",
     updated: url.searchParams.get("updated") === "1",
     deleted: url.searchParams.get("deleted") === "1",
@@ -175,7 +180,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (intent === "delete") {
       await deleteExpenseWithEntry(shop.id, String(form.get("expenseId") || ""));
-      return redirect("/app/expenses?deleted=1");
+      return redirect("/app/expenses?deleted=1&notice=delete");
     }
 
     if (intent === "update") {
@@ -183,14 +188,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const data = parseExpenseForm(form);
       await deleteExpenseWithEntry(shop.id, expenseId);
       await postExpense(shop.id, data);
-      return redirect("/app/expenses?updated=1");
+      return redirect("/app/expenses?updated=1&notice=update");
     }
 
     await postExpense(shop.id, parseExpenseForm(form));
-    return redirect("/app/expenses?saved=1");
+    return redirect("/app/expenses?saved=1&notice=save");
   } catch (error) {
     const message = encodeURIComponent(error instanceof Error ? error.message : String(error));
-    return redirect(`/app/expenses?error=${message}`);
+    return redirect(`/app/expenses?error=${message}&notice=${intent}`);
   }
 };
 
@@ -205,18 +210,24 @@ function ExpenseField({ id, label, type = "text", defaultValue, step, required =
   );
 }
 
+function InlineNotice({ tone, children }: { tone: "success" | "warning" | "critical"; children: React.ReactNode }) {
+  return <s-banner tone={tone}>{children}</s-banner>;
+}
+
 const buttonStyle = { minHeight: "2.25rem", padding: "0 0.9rem", border: "1px solid #303030", borderRadius: "0.5rem", background: "#303030", color: "white", fontWeight: 600, cursor: "pointer" };
 const lightButtonStyle = { ...buttonStyle, background: "white", color: "#303030" };
 const dangerButtonStyle = { ...buttonStyle, background: "#b42318", borderColor: "#b42318" };
 
 export default function ExpensesPage() {
-  const { expenses, defaults, saved, updated, deleted, scanned, error } = useLoaderData<typeof loader>();
+  const { expenses, defaults, saved, updated, deleted, scanned, error, notice } = useLoaderData<typeof loader>();
 
   useEffect(() => {
     const key = "expenses-scroll-y";
     const savedY = sessionStorage.getItem(key);
     if (savedY) {
-      requestAnimationFrame(() => window.scrollTo({ top: Number(savedY), behavior: "auto" }));
+      setTimeout(() => window.scrollTo(0, Number(savedY)), 0);
+      setTimeout(() => window.scrollTo(0, Number(savedY)), 100);
+      setTimeout(() => window.scrollTo(0, Number(savedY)), 350);
       sessionStorage.removeItem(key);
     }
 
@@ -227,26 +238,22 @@ export default function ExpensesPage() {
 
   return (
     <s-page heading="Kosten">
-      {error ? <s-section><s-banner tone="critical">Kosten boeken mislukt: {error}</s-banner></s-section> : null}
-      {saved ? <s-section><s-banner tone="success">Kosten zijn geboekt.</s-banner></s-section> : null}
-      {updated ? <s-section><s-banner tone="success">Kostenpost is gewijzigd.</s-banner></s-section> : null}
-      {deleted ? <s-section><s-banner tone="success">Kostenpost is verwijderd.</s-banner></s-section> : null}
-      {scanned ? <s-section><s-banner tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</s-banner></s-section> : null}
-
       <s-section heading="Bon/factuur scanner">
         <s-paragraph>Gebruik Live Text of Google Lens op je telefoon, plak de tekst hieronder en klik op Bontekst uitlezen.</s-paragraph>
         <ReceiptOcrScanner />
-        <Form method="post">
+        <Form method="post" preventScrollReset>
           <input type="hidden" name="intent" value="scan" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem" }}>
             <textarea name="receiptText" rows={8} placeholder="Plak hier de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
             <div><button type="submit" style={buttonStyle}>Bontekst uitlezen</button></div>
+            {notice === "scan" && error ? <InlineNotice tone="critical">Bontekst uitlezen mislukt: {error}</InlineNotice> : null}
+            {notice === "scan" && scanned ? <InlineNotice tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</InlineNotice> : null}
           </div>
         </Form>
       </s-section>
 
       <s-section heading="Kosten boeken">
-        <Form method="post">
+        <Form method="post" preventScrollReset>
           <input type="hidden" name="intent" value="save" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "34rem" }}>
             <ExpenseField id="date" label="Datum" type="date" defaultValue={defaults.date} required />
@@ -264,6 +271,8 @@ export default function ExpensesPage() {
             <ExpenseField id="total" label="Totaal betaald" type="number" step="0.01" defaultValue={defaults.total} required />
             <s-paragraph>Laat exclusief btw en btw leeg als je alleen het totaal weet. De app rekent dan automatisch terug op basis van het gekozen btw-percentage.</s-paragraph>
             <div><button type="submit" style={buttonStyle}>Kosten boeken</button></div>
+            {notice === "save" && error ? <InlineNotice tone="critical">Kosten boeken mislukt: {error}</InlineNotice> : null}
+            {notice === "save" && saved ? <InlineNotice tone="success">Kosten zijn geboekt.</InlineNotice> : null}
           </div>
         </Form>
       </s-section>
@@ -274,7 +283,7 @@ export default function ExpensesPage() {
             {expenses.map((expense) => (
               <details key={expense.id} style={{ border: "1px solid #e1e3e5", borderRadius: "1rem", padding: "1rem", background: "white" }}>
                 <summary style={{ cursor: "pointer", fontWeight: 700 }}>{expense.date} · {expense.supplier} · {formatEuros(BigInt(expense.totalCents))} · boeking #{expense.entryNumber}</summary>
-                <Form method="post">
+                <Form method="post" preventScrollReset>
                   <input type="hidden" name="intent" value="update" />
                   <input type="hidden" name="expenseId" value={expense.id} />
                   <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem", maxWidth: "34rem" }}>
@@ -286,15 +295,19 @@ export default function ExpensesPage() {
                     <ExpenseField id="vat" label="Btw" type="number" step="0.01" defaultValue={expense.vat} />
                     <ExpenseField id="total" label="Totaal betaald" type="number" step="0.01" defaultValue={expense.total} required />
                     <input type="hidden" name="vatRate" value="21" />
-                    <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                      <button type="submit" style={lightButtonStyle}>Wijzig opslaan</button>
-                    </div>
+                    <div><button type="submit" style={lightButtonStyle}>Wijzig opslaan</button></div>
+                    {notice === "update" && error ? <InlineNotice tone="critical">Wijzigen mislukt: {error}</InlineNotice> : null}
+                    {notice === "update" && updated ? <InlineNotice tone="success">Kostenpost is gewijzigd.</InlineNotice> : null}
                   </div>
                 </Form>
-                <Form method="post">
+                <Form method="post" preventScrollReset>
                   <input type="hidden" name="intent" value="delete" />
                   <input type="hidden" name="expenseId" value={expense.id} />
-                  <div style={{ marginTop: "0.75rem" }}><button type="submit" style={dangerButtonStyle}>Verwijderen</button></div>
+                  <div style={{ display: "grid", gap: "0.75rem", marginTop: "0.75rem", maxWidth: "34rem" }}>
+                    <button type="submit" style={dangerButtonStyle}>Verwijderen</button>
+                    {notice === "delete" && error ? <InlineNotice tone="critical">Verwijderen mislukt: {error}</InlineNotice> : null}
+                    {notice === "delete" && deleted ? <InlineNotice tone="success">Kostenpost is verwijderd.</InlineNotice> : null}
+                  </div>
                 </Form>
               </details>
             ))}
