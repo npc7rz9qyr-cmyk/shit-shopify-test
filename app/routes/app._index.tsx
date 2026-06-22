@@ -70,7 +70,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const periodWhere = { shopId: shop.id, processedAt: { gte: start, lte: end } };
   const expenseWhere = { shopId: shop.id, date: { gte: start, lte: end } };
 
-  const [orders, journals, errors, orderRows, expenseTotals] = await Promise.all([
+  const [orders, journals, errors, orderRows, expenseTotals, shippingTotals] = await Promise.all([
     prisma.orderSnapshot.count({ where: periodWhere }),
     prisma.journalEntry.count({ where: { shopId: shop.id, status: "POSTED", date: { gte: start, lte: end } } }),
     prisma.syncError.count({ where: { shopId: shop.id, resolvedAt: null } }),
@@ -79,6 +79,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { grossCents: true, taxCents: true, refundCents: true, refundTaxCents: true },
     }),
     prisma.expense.aggregate({ where: expenseWhere, _sum: { netCents: true, vatCents: true, totalCents: true } }),
+    prisma.orderSnapshot.aggregate({ where: periodWhere, _sum: { shippingCents: true } }),
   ]);
 
   const vatBoxes = {
@@ -112,6 +113,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const purchaseVat = expenseTotals._sum.vatCents || 0n;
   const salesExVat = vatBoxes.high.amount + vatBoxes.low.amount + vatBoxes.other.amount + vatBoxes.zero.amount;
   const vatDue = salesVat - purchaseVat;
+  const shippingCents = shippingTotals._sum.shippingCents || 0n;
 
   return {
     shop: shop.domain,
@@ -128,10 +130,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     salesExVatCents: salesExVat.toString(),
     taxCents: salesVat.toString(),
     refundCents: refundCents.toString(),
+    shippingCents: shippingCents.toString(),
     costNetCents: (expenseTotals._sum.netCents || 0n).toString(),
     costVatCents: purchaseVat.toString(),
     costTotalCents: (expenseTotals._sum.totalCents || 0n).toString(),
     vatDueCents: vatDue.toString(),
+    shippingExpenseStatus: url.searchParams.get("shippingExpense") || "",
+    shippingExpenseError: url.searchParams.get("error") || "",
+    shippingExpenseTotal: url.searchParams.get("shippingTotal") || "",
     declarationRows: [
       { code: "1a", label: "Leveringen/diensten belast met hoog tarief", amountCents: vatBoxes.high.amount.toString(), vatCents: vatBoxes.high.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 21%." },
       { code: "1b", label: "Leveringen/diensten belast met laag tarief", amountCents: vatBoxes.low.amount.toString(), vatCents: vatBoxes.low.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 9%." },
@@ -188,11 +194,25 @@ export default function Dashboard() {
         <s-stack direction="inline" gap="base">
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Omzet excl. btw</s-text><s-heading>{formatEuros(BigInt(data.salesExVatCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Btw verkoop</s-text><s-heading>{formatEuros(BigInt(data.taxCents))}</s-heading></s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Verzendbedragen orders</s-text><s-heading>{formatEuros(BigInt(data.shippingCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Refunds</s-text><s-heading>{formatEuros(BigInt(data.refundCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Kosten excl. btw</s-text><s-heading>{formatEuros(BigInt(data.costNetCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Btw inkopen / 5b</s-text><s-heading>{formatEuros(BigInt(data.costVatCents))}</s-heading></s-box>
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Te betalen btw</s-text><s-heading>{formatEuros(BigInt(data.vatDueCents))}</s-heading></s-box>
         </s-stack>
+      </s-section>
+
+      <s-section heading="Automatische verzendkosten boeken">
+        <s-paragraph>Boek één kostenpost voor dit kwartaal op basis van de verzendbedragen uit de geïmporteerde Shopify-orders. De app boekt deze post met 0% btw, zodat er geen extra voorbelasting wordt geclaimd bovenop de order-btw. Controleer dit altijd met je echte PostNL/Sendcloud/label-facturen.</s-paragraph>
+        <Form method="post" action="/app/shipping-costs">
+          <input type="hidden" name="year" value={data.selectedYear} />
+          <input type="hidden" name="quarter" value={data.selectedQuarter} />
+          <button type="submit" style={secondaryButtonStyle}>Boek verzendkosten kwartaal</button>
+        </Form>
+        {data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt als kwartaal-kostenpost: {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}.</s-banner> : null}
+        {data.shippingExpenseStatus === "exists" ? <s-banner tone="warning">Verzendkosten voor dit kwartaal waren al automatisch geboekt. Er is geen dubbele kostenpost gemaakt.</s-banner> : null}
+        {data.shippingExpenseStatus === "none" ? <s-banner tone="warning">Er zijn geen verzendbedragen gevonden in de geïmporteerde orders van dit kwartaal.</s-banner> : null}
+        {data.shippingExpenseStatus === "error" ? <s-banner tone="critical">Verzendkosten boeken mislukt: {data.shippingExpenseError}</s-banner> : null}
       </s-section>
 
       <s-section heading={`BTW-aangifte overnemen ${data.periodLabel}`}>
@@ -206,7 +226,7 @@ export default function Dashboard() {
       </s-section>
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
-      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op.</s-paragraph></s-section>
+      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op. Daarna kun je met “Boek verzendkosten kwartaal” automatisch één kwartaalpost voor verzendkosten maken.</s-paragraph></s-section>
     </s-page>
   );
 }
