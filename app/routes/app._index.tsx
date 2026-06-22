@@ -208,10 +208,10 @@ export default function Dashboard() {
         <Form method="post" action="/app/shipping-costs">
           <input type="hidden" name="year" value={data.selectedYear} />
           <input type="hidden" name="quarter" value={data.selectedQuarter} />
-          <button type="submit" style={secondaryButtonStyle}>Boek verzendkosten kwartaal met 21% btw</button>
+          <button type="submit" style={secondaryButtonStyle}>Boek/herboek verzendkosten met 21% btw</button>
         </Form>
         {data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt: totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan btw {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}
-        {data.shippingExpenseStatus === "exists" ? <s-banner tone="warning">Verzendkosten voor dit kwartaal waren al automatisch geboekt. Er is geen dubbele kostenpost gemaakt.</s-banner> : null}
+        {data.shippingExpenseStatus === "rebooked" ? <s-banner tone="success">Oude automatische verzendkostenpost is vervangen door een nieuwe post met 21% btw. Totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan voorbelasting {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}
         {data.shippingExpenseStatus === "none" ? <s-banner tone="warning">Er zijn geen verzendbedragen gevonden in de geïmporteerde orders van dit kwartaal.</s-banner> : null}
         {data.shippingExpenseStatus === "error" ? <s-banner tone="critical">Verzendkosten boeken mislukt: {data.shippingExpenseError}</s-banner> : null}
       </s-section>
@@ -227,7 +227,7 @@ export default function Dashboard() {
       </s-section>
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
-      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op. Daarna kun je met “Boek verzendkosten kwartaal met 21% btw” automatisch één kwartaalpost voor verzendkosten maken.</s-paragraph></s-section>
+      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op. Daarna kun je met “Boek/herboek verzendkosten met 21% btw” automatisch één kwartaalpost voor verzendkosten maken.</s-paragraph></s-section>
     </s-page>
   );
 }
