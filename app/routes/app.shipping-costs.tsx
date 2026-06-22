@@ -1,9 +1,9 @@
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { ensureShop } from "../services/shop.server";
+import { authenticate } from "../shopify.server";
 import { postExpense } from "../services/expenses.server";
+import { ensureShop } from "../services/shop.server";
 
 function safeYear(value: FormDataEntryValue | null) {
   const parsed = Number(value);
@@ -36,6 +36,15 @@ function redirectToDashboard(year: number, quarter: number, params: Record<strin
   return redirect(`/app?${search.toString()}`);
 }
 
+async function deleteExpenseWithEntry(shopId: string, expenseId: string) {
+  const expense = await prisma.expense.findFirst({ where: { id: expenseId, shopId } });
+  if (!expense) return;
+  await prisma.$transaction([
+    prisma.expense.delete({ where: { id: expense.id } }),
+    prisma.journalEntry.delete({ where: { id: expense.journalEntryId } }),
+  ]);
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop, admin);
@@ -43,21 +52,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const year = safeYear(formData.get("year"));
   const quarter = safeQuarter(formData.get("quarter"));
   const { start, end } = quarterRange(year, quarter);
+  const oldInvoiceNumber = `AUTO-SHIPPING-${year}-Q${quarter}`;
   const invoiceNumber = `AUTO-SHIPPING-21VAT-${year}-Q${quarter}`;
 
   try {
-    const existing = await prisma.expense.findFirst({
-      where: { shopId: shop.id, invoiceNumber },
-      select: { id: true },
-    });
-
-    if (existing) {
-      return redirectToDashboard(year, quarter, {
-        shippingExpense: "exists",
-        notice: "shipping-costs",
-      });
-    }
-
     const shippingTotals = await prisma.orderSnapshot.aggregate({
       where: { shopId: shop.id, processedAt: { gte: start, lte: end } },
       _sum: { shippingCents: true },
@@ -69,6 +67,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shippingExpense: "none",
         notice: "shipping-costs",
       });
+    }
+
+    const existingAutoExpenses = await prisma.expense.findMany({
+      where: {
+        shopId: shop.id,
+        invoiceNumber: { in: [oldInvoiceNumber, invoiceNumber] },
+      },
+      select: { id: true },
+    });
+
+    for (const expense of existingAutoExpenses) {
+      await deleteExpenseWithEntry(shop.id, expense.id);
     }
 
     const { netCents, vatCents } = splitInclusiveVat(totalCents, 21);
@@ -84,7 +94,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     return redirectToDashboard(year, quarter, {
-      shippingExpense: "booked",
+      shippingExpense: existingAutoExpenses.length ? "rebooked" : "booked",
       shippingTotal: totalCents.toString(),
       shippingVat: vatCents.toString(),
       notice: "shipping-costs",
