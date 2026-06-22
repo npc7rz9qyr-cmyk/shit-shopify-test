@@ -18,6 +18,13 @@ type ScanResult = {
   total?: string;
 };
 
+type OcrSpaceResponse = {
+  ParsedResults?: Array<{ ParsedText?: string | null; ErrorMessage?: string | string[] | null; ErrorDetails?: string | null }>;
+  IsErroredOnProcessing?: boolean;
+  ErrorMessage?: string | string[] | null;
+  ErrorDetails?: string | null;
+};
+
 function centsToInput(value: bigint) {
   const negative = value < 0n;
   const absolute = negative ? -value : value;
@@ -33,6 +40,42 @@ function calculateVatFromTotal(totalCents: bigint, vatRate: number) {
 
 function parseAmount(value: FormDataEntryValue | null) {
   return moneyToCents(String(value || "0").replace(",", "."));
+}
+
+function stringError(value: unknown) {
+  if (Array.isArray(value)) return value.join(" ");
+  return value ? String(value) : "";
+}
+
+async function readReceiptWithOcrSpace(file: File) {
+  const apiKey = process.env.OCR_SPACE_API_KEY;
+  if (!apiKey) throw new Error("OCR_SPACE_API_KEY ontbreekt in Render environment variables");
+  if (!file || file.size === 0) throw new Error("Upload eerst een bon of factuur");
+
+  const body = new FormData();
+  body.append("file", file, file.name || "receipt.jpg");
+  body.append("language", "dut");
+  body.append("isOverlayRequired", "false");
+  body.append("isTable", "true");
+  body.append("scale", "true");
+  body.append("detectOrientation", "true");
+  body.append("OCREngine", "2");
+
+  const response = await fetch("https://api.ocr.space/parse/image", {
+    method: "POST",
+    headers: { apikey: apiKey },
+    body,
+  });
+
+  if (!response.ok) throw new Error(`OCR.space gaf status ${response.status}`);
+  const data = (await response.json()) as OcrSpaceResponse;
+  const apiError = stringError(data.ErrorMessage) || data.ErrorDetails || "";
+  const pageError = stringError(data.ParsedResults?.[0]?.ErrorMessage) || data.ParsedResults?.[0]?.ErrorDetails || "";
+  if (data.IsErroredOnProcessing || apiError || pageError) throw new Error(apiError || pageError || "OCR.space kon de bon niet uitlezen");
+
+  const text = (data.ParsedResults || []).map((page) => page.ParsedText || "").join("\n").trim();
+  if (!text) throw new Error("OCR.space vond geen tekst op deze bon");
+  return text;
 }
 
 function parseReceiptText(text: string): ScanResult {
@@ -73,14 +116,10 @@ function parseReceiptText(text: string): ScanResult {
   return result;
 }
 
-function receiptParams(receipt: ScanResult) {
-  const params = new URLSearchParams({ scanned: "1", notice: "scan" });
+function receiptParams(receipt: ScanResult, notice = "scan") {
+  const params = new URLSearchParams({ scanned: "1", notice });
   for (const [key, value] of Object.entries(receipt)) if (value) params.set(key, value);
   return params;
-}
-
-function withNotice(path: string, notice: string) {
-  return `${path}${path.includes("?") ? "&" : "?"}notice=${notice}`;
 }
 
 function parseExpenseForm(form: FormData) {
@@ -173,6 +212,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(form.get("intent") || "save");
 
   try {
+    if (intent === "ocr-space") {
+      const file = form.get("receiptFile");
+      if (!(file instanceof File)) throw new Error("Upload eerst een bon of factuur");
+      const text = await readReceiptWithOcrSpace(file);
+      const parsed = parseReceiptText(text);
+      return redirect(`/app/expenses?${receiptParams(parsed, "ocr-space").toString()}`);
+    }
+
     if (intent === "scan") {
       const parsed = parseReceiptText(String(form.get("receiptText") || ""));
       return redirect(`/app/expenses?${receiptParams(parsed).toString()}`);
@@ -239,13 +286,25 @@ export default function ExpensesPage() {
   return (
     <s-page heading="Kosten">
       <s-section heading="Bon/factuur scanner">
-        <s-paragraph>Gebruik Live Text of Google Lens op je telefoon, plak de tekst hieronder en klik op Bontekst uitlezen.</s-paragraph>
+        <s-paragraph>Upload een bon/factuur via OCR.space of plak handmatig de tekst. Controleer daarna altijd de ingevulde velden.</s-paragraph>
         <ReceiptOcrScanner />
+
+        <Form method="post" encType="multipart/form-data" preventScrollReset>
+          <input type="hidden" name="intent" value="ocr-space" />
+          <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem", marginBottom: "1rem" }}>
+            <input name="receiptFile" type="file" accept="image/*,.pdf" required style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
+            <div><button type="submit" style={buttonStyle}>Bon uploaden en automatisch uitlezen</button></div>
+            <s-paragraph>OCR.space gratis API heeft beperkte limieten. Gebruik bij voorkeur scherpe JPG/PNG-foto's en voeg in Render de variabele OCR_SPACE_API_KEY toe.</s-paragraph>
+            {notice === "ocr-space" && error ? <InlineNotice tone="critical">OCR uitlezen mislukt: {error}</InlineNotice> : null}
+            {notice === "ocr-space" && scanned ? <InlineNotice tone="warning">OCR is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</InlineNotice> : null}
+          </div>
+        </Form>
+
         <Form method="post" preventScrollReset>
           <input type="hidden" name="intent" value="scan" />
           <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem" }}>
-            <textarea name="receiptText" rows={8} placeholder="Plak hier de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
-            <div><button type="submit" style={buttonStyle}>Bontekst uitlezen</button></div>
+            <textarea name="receiptText" rows={8} placeholder="Of plak hier handmatig de tekst van je bon of factuur..." style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
+            <div><button type="submit" style={lightButtonStyle}>Handmatige bontekst uitlezen</button></div>
             {notice === "scan" && error ? <InlineNotice tone="critical">Bontekst uitlezen mislukt: {error}</InlineNotice> : null}
             {notice === "scan" && scanned ? <InlineNotice tone="warning">Bontekst is uitgelezen. Controleer de velden en klik daarna op Kosten boeken.</InlineNotice> : null}
           </div>
