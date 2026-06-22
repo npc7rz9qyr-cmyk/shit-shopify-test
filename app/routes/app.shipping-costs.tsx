@@ -25,6 +25,12 @@ function quarterRange(year: number, quarter: number) {
   };
 }
 
+function splitInclusiveVat(totalCents: bigint, vatRate: number) {
+  if (vatRate <= 0) return { netCents: totalCents, vatCents: 0n };
+  const vatCents = (totalCents * BigInt(vatRate)) / BigInt(100 + vatRate);
+  return { netCents: totalCents - vatCents, vatCents };
+}
+
 function redirectToDashboard(year: number, quarter: number, params: Record<string, string>) {
   const search = new URLSearchParams({ year: String(year), quarter: String(quarter), ...params });
   return redirect(`/app?${search.toString()}`);
@@ -37,7 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const year = safeYear(formData.get("year"));
   const quarter = safeQuarter(formData.get("quarter"));
   const { start, end } = quarterRange(year, quarter);
-  const invoiceNumber = `AUTO-SHIPPING-${year}-Q${quarter}`;
+  const invoiceNumber = `AUTO-SHIPPING-21VAT-${year}-Q${quarter}`;
 
   try {
     const existing = await prisma.expense.findFirst({
@@ -65,19 +71,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    const { netCents, vatCents } = splitInclusiveVat(totalCents, 21);
+
     await postExpense(shop.id, {
       date: end,
-      supplier: "Automatisch uit Shopify",
-      description: `Verzendkosten ${year} Q${quarter} op basis van Shopify-orders`,
+      supplier: "PostNL / verzendlabels",
+      description: `Verzendkosten ${year} Q${quarter} automatisch berekend met 21% btw`,
       invoiceNumber,
-      netCents: totalCents,
-      vatCents: 0n,
+      netCents,
+      vatCents,
       totalCents,
     });
 
     return redirectToDashboard(year, quarter, {
       shippingExpense: "booked",
       shippingTotal: totalCents.toString(),
+      shippingVat: vatCents.toString(),
       notice: "shipping-costs",
     });
   } catch (error) {
