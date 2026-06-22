@@ -138,6 +138,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shippingExpenseStatus: url.searchParams.get("shippingExpense") || "",
     shippingExpenseError: url.searchParams.get("error") || "",
     shippingExpenseTotal: url.searchParams.get("shippingTotal") || "",
+    shippingExpenseVat: url.searchParams.get("shippingVat") || "",
     declarationRows: [
       { code: "1a", label: "Leveringen/diensten belast met hoog tarief", amountCents: vatBoxes.high.amount.toString(), vatCents: vatBoxes.high.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 21%." },
       { code: "1b", label: "Leveringen/diensten belast met laag tarief", amountCents: vatBoxes.low.amount.toString(), vatCents: vatBoxes.low.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 9%." },
@@ -151,7 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       { code: "4a", label: "Leveringen/diensten uit landen buiten de EU", amountCents: zeroCents, vatCents: zeroCents, note: "Nog handmatig; gebruik kostenfunctie voor normale voorbelasting." },
       { code: "4b", label: "Leveringen/diensten uit landen binnen de EU", amountCents: zeroCents, vatCents: zeroCents, note: "Nog handmatig; voor EU-diensten/verlegde btw komt aparte kostensoort." },
       { code: "5a", label: "Verschuldigde btw", amountCents: zeroCents, vatCents: salesVat.toString(), note: "Som van automatisch herkende btw uit 1a/1b/1c." },
-      { code: "5b", label: "Voorbelasting", amountCents: (expenseTotals._sum.netCents || 0n).toString(), vatCents: purchaseVat.toString(), note: "Btw op ingevoerde zakelijke kosten/inkopen." },
+      { code: "5b", label: "Voorbelasting", amountCents: (expenseTotals._sum.netCents || 0n).toString(), vatCents: purchaseVat.toString(), note: "Btw op ingevoerde zakelijke kosten/inkopen, inclusief automatisch geboekte verzendkosten met 21% btw." },
       { code: "Saldo", label: "Te betalen / terug te vragen", amountCents: zeroCents, vatCents: vatDue.toString(), note: "5a min 5b. Negatief bedrag betekent terug te vragen." },
     ],
   };
@@ -203,13 +204,13 @@ export default function Dashboard() {
       </s-section>
 
       <s-section heading="Automatische verzendkosten boeken">
-        <s-paragraph>Boek één kostenpost voor dit kwartaal op basis van de verzendbedragen uit de geïmporteerde Shopify-orders. De app boekt deze post met 0% btw, zodat er geen extra voorbelasting wordt geclaimd bovenop de order-btw. Controleer dit altijd met je echte PostNL/Sendcloud/label-facturen.</s-paragraph>
+        <s-paragraph>Boek één kwartaalpost voor PostNL/verzendlabels op basis van de verzendbedragen uit de geïmporteerde Shopify-orders. De app behandelt het verzendbedrag als inclusief 21% btw en zet de btw automatisch op voorbelasting / 5b.</s-paragraph>
         <Form method="post" action="/app/shipping-costs">
           <input type="hidden" name="year" value={data.selectedYear} />
           <input type="hidden" name="quarter" value={data.selectedQuarter} />
-          <button type="submit" style={secondaryButtonStyle}>Boek verzendkosten kwartaal</button>
+          <button type="submit" style={secondaryButtonStyle}>Boek verzendkosten kwartaal met 21% btw</button>
         </Form>
-        {data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt als kwartaal-kostenpost: {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}.</s-banner> : null}
+        {data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt: totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan btw {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}
         {data.shippingExpenseStatus === "exists" ? <s-banner tone="warning">Verzendkosten voor dit kwartaal waren al automatisch geboekt. Er is geen dubbele kostenpost gemaakt.</s-banner> : null}
         {data.shippingExpenseStatus === "none" ? <s-banner tone="warning">Er zijn geen verzendbedragen gevonden in de geïmporteerde orders van dit kwartaal.</s-banner> : null}
         {data.shippingExpenseStatus === "error" ? <s-banner tone="critical">Verzendkosten boeken mislukt: {data.shippingExpenseError}</s-banner> : null}
@@ -226,7 +227,7 @@ export default function Dashboard() {
       </s-section>
 
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
-      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op. Daarna kun je met “Boek verzendkosten kwartaal” automatisch één kwartaalpost voor verzendkosten maken.</s-paragraph></s-section>
+      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Klik daarna op “Importeer dit kwartaal”; de app haalt dan precies die periode uit Shopify op. Daarna kun je met “Boek verzendkosten kwartaal met 21% btw” automatisch één kwartaalpost voor verzendkosten maken.</s-paragraph></s-section>
     </s-page>
   );
 }
