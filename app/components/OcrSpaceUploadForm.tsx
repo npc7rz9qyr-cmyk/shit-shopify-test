@@ -75,6 +75,23 @@ function formatKb(bytes: number) {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
+const primaryButton = {
+  minHeight: "2.5rem",
+  padding: "0 1rem",
+  border: "1px solid #303030",
+  borderRadius: "0.65rem",
+  background: "#303030",
+  color: "white",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const secondaryButton = {
+  ...primaryButton,
+  background: "white",
+  color: "#303030",
+};
+
 export function OcrSpaceUploadForm() {
   const [base64Image, setBase64Image] = useState("");
   const [fileName, setFileName] = useState("");
@@ -104,16 +121,28 @@ export function OcrSpaceUploadForm() {
       <input type="hidden" name="intent" value="ocr-space" />
       <input type="hidden" name="base64Image" value={base64Image} />
       <input type="hidden" name="fileName" value={fileName} />
-      <div style={{ display: "grid", gap: "0.75rem", maxWidth: "42rem", marginBottom: "1rem" }}>
-        <input type="file" accept="image/*" required onChange={(event) => handleFile(event.currentTarget.files?.[0])} style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", width: "100%", boxSizing: "border-box" }} />
-        <div>
-          <button type="submit" disabled={!base64Image} style={{ minHeight: "2.25rem", padding: "0 0.9rem", border: "1px solid #303030", borderRadius: "0.5rem", background: base64Image ? "#303030" : "#d0d5dd", color: "white", fontWeight: 600, cursor: base64Image ? "pointer" : "not-allowed" }}>
-            Bon uploaden en automatisch uitlezen
-          </button>
+
+      <div style={{ display: "grid", gap: "1rem", maxWidth: "42rem" }}>
+        <div style={{ border: "1px dashed #8c9196", borderRadius: "1rem", padding: "1.25rem", background: "#fafafa", display: "grid", gap: "0.75rem" }}>
+          <div style={{ fontWeight: 800, fontSize: "1rem" }}>Bon of factuur uploaden</div>
+          <div style={{ color: "#616161", lineHeight: 1.5 }}>Kies een scherpe JPG/PNG-foto. De app verkleint de foto automatisch voordat OCR.space hem uitleest.</div>
+
+          <input id="ocr-space-file" type="file" accept="image/*" onChange={(event) => handleFile(event.currentTarget.files?.[0])} style={{ display: "none" }} />
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
+            <label htmlFor="ocr-space-file" style={secondaryButton}>Bon kiezen</label>
+            <button type="submit" disabled={!base64Image} style={{ ...primaryButton, opacity: base64Image ? 1 : 0.45, cursor: base64Image ? "pointer" : "not-allowed" }}>
+              Automatisch uitlezen
+            </button>
+          </div>
+
+          <div style={{ fontSize: "0.9rem", color: fileName ? "#303030" : "#6b7280" }}>
+            {fileName ? `Gekozen bestand: ${fileName}` : "Nog geen bestand gekozen"}
+          </div>
         </div>
+
         {status ? <s-banner tone="success">{status}</s-banner> : null}
         {error ? <s-banner tone="critical">{error}</s-banner> : null}
-        <s-paragraph>De foto wordt eerst automatisch verkleind, zodat OCR.space geen 413-fout meer geeft. Gebruik JPG/PNG, geen PDF.</s-paragraph>
       </div>
     </Form>
   );
