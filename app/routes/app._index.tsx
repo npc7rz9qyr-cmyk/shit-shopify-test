@@ -1,10 +1,10 @@
 import type { CSSProperties } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Form, useLoaderData } from "react-router";
-import prisma from "../db.server";
-import { formatEuros } from "../services/money";
-import { ensureShop } from "../services/shop.server";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+import { ensureShop } from "../services/shop.server";
+import { formatEuros } from "../services/money";
 
 function currentQuarterSelection() {
   const now = new Date();
@@ -23,7 +23,10 @@ function parseYear(value: string | null, fallback: number) {
 
 function quarterRange(year: number, quarter: number) {
   const startMonth = (quarter - 1) * 3;
-  return { start: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)), end: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999)) };
+  return {
+    start: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999)),
+  };
 }
 
 function quarterLabel(year: number, quarter: number) { return `Q${quarter} ${year}`; }
@@ -78,9 +81,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const salesVat = vatBoxes.high.vat + vatBoxes.low.vat + vatBoxes.other.vat + vatBoxes.zero.vat;
   const purchaseVat = expenseTotals._sum.vatCents || 0n;
   const salesExVat = vatBoxes.high.amount + vatBoxes.low.amount + vatBoxes.other.amount + vatBoxes.zero.amount;
+  const costNetCents = expenseTotals._sum.netCents || 0n;
   const vatDue = salesVat - purchaseVat;
   const shippingCents = shippingTotals._sum.shippingCents || 0n;
-  const costNetCents = expenseTotals._sum.netCents || 0n;
   const netAfterCostsCents = salesExVat - costNetCents;
 
   return {
@@ -108,9 +111,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shippingExpenseError: url.searchParams.get("error") || "",
     shippingExpenseTotal: url.searchParams.get("shippingTotal") || "",
     shippingExpenseVat: url.searchParams.get("shippingVat") || "",
-    shopifyFeesStatus: url.searchParams.get("shopifyFees") || "",
-    shopifyFeesError: url.searchParams.get("error") || "",
-    shopifyFeesTotal: url.searchParams.get("shopifyFeeTotal") || "",
     declarationRows: [
       { code: "1a", label: "Leveringen/diensten belast met hoog tarief", amountCents: vatBoxes.high.amount.toString(), vatCents: vatBoxes.high.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 21%." },
       { code: "1b", label: "Leveringen/diensten belast met laag tarief", amountCents: vatBoxes.low.amount.toString(), vatCents: vatBoxes.low.vat.toString(), note: "Automatisch gedetecteerd op effectief btw-tarief rond 9%." },
@@ -138,7 +138,6 @@ export default function Dashboard() {
       <s-section heading="Dashboard kwartaal">
         <Form method="get"><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(12rem, 1fr))", gap: "0.75rem", alignItems: "end", maxWidth: "52rem" }}><div style={{ display: "grid", gap: "0.35rem" }}><label htmlFor="year" style={{ fontWeight: 600 }}>Jaar</label><select id="year" name="year" defaultValue={String(data.selectedYear)} style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", background: "white" }}>{data.yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select></div><div style={{ display: "grid", gap: "0.35rem" }}><label htmlFor="quarter" style={{ fontWeight: 600 }}>Kwartaal</label><select id="quarter" name="quarter" defaultValue={String(data.selectedQuarter)} style={{ padding: "0.65rem", border: "1px solid #8c9196", borderRadius: "0.5rem", background: "white" }}><option value="1">Q1 — januari t/m maart</option><option value="2">Q2 — april t/m juni</option><option value="3">Q3 — juli t/m september</option><option value="4">Q4 — oktober t/m december</option></select></div><div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}><button type="submit" style={secondaryButtonStyle}>Dashboard tonen</button><button type="submit" formMethod="post" formAction="/app/import" style={nativeButtonStyle}>Importeer dit kwartaal</button></div></div></Form>
       </s-section>
-
       <s-section heading={`Administratie ${data.periodLabel}`}>
         <s-paragraph>Periode: {new Date(data.periodStart).toLocaleDateString("nl-NL")} t/m {new Date(data.periodEnd).toLocaleDateString("nl-NL")}</s-paragraph>
         <s-stack direction="inline" gap="base">
@@ -152,28 +151,10 @@ export default function Dashboard() {
           <s-box padding="base" borderWidth="base" borderRadius="base"><s-text type="strong">Te betalen btw</s-text><s-heading>{formatEuros(BigInt(data.vatDueCents))}</s-heading></s-box>
         </s-stack>
       </s-section>
-
-      <s-section heading="Automatische Shopify kosten boeken">
-        <s-paragraph>Boek één kwartaalpost voor Shopify/transactiekosten op basis van 2% van de betaalde orderomzet. Dit wordt als kosten zonder btw geboekt, zodat je omzet en verkoop-btw niet worden verlaagd.</s-paragraph>
-        <Form method="post" action="/app/shopify-fees"><input type="hidden" name="year" value={data.selectedYear} /><input type="hidden" name="quarter" value={data.selectedQuarter} /><button type="submit" style={secondaryButtonStyle}>Boek/herboek Shopify kosten 2%</button></Form>
-        {data.shopifyFeesStatus === "booked" ? <s-banner tone="success">Shopify kosten zijn geboekt: {formatEuros(BigInt(data.shopifyFeesTotal || "0"))}.</s-banner> : null}
-        {data.shopifyFeesStatus === "rebooked" ? <s-banner tone="success">Oude Shopify kostenpost is vervangen door een nieuwe 2%-boeking: {formatEuros(BigInt(data.shopifyFeesTotal || "0"))}.</s-banner> : null}
-        {data.shopifyFeesStatus === "none" ? <s-banner tone="warning">Er is geen orderomzet gevonden om Shopify kosten over te berekenen.</s-banner> : null}
-        {data.shopifyFeesStatus === "error" ? <s-banner tone="critical">Shopify kosten boeken mislukt: {data.shopifyFeesError}</s-banner> : null}
-      </s-section>
-
-      <s-section heading="Automatische verzendkosten boeken">
-        <s-paragraph>Boek één kwartaalpost voor PostNL/verzendlabels op basis van de verzendbedragen uit de geïmporteerde Shopify-orders. De app behandelt het verzendbedrag als inclusief 21% btw en zet de btw automatisch op voorbelasting / 5b.</s-paragraph>
-        <Form method="post" action="/app/shipping-costs"><input type="hidden" name="year" value={data.selectedYear} /><input type="hidden" name="quarter" value={data.selectedQuarter} /><button type="submit" style={secondaryButtonStyle}>Boek/herboek verzendkosten met 21% btw</button></Form>
-        {data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt: totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan btw {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}
-        {data.shippingExpenseStatus === "rebooked" ? <s-banner tone="success">Oude automatische verzendkostenpost is vervangen door een nieuwe post met 21% btw. Totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan voorbelasting {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}
-        {data.shippingExpenseStatus === "none" ? <s-banner tone="warning">Er zijn geen verzendbedragen gevonden in de geïmporteerde orders van dit kwartaal.</s-banner> : null}
-        {data.shippingExpenseStatus === "error" ? <s-banner tone="critical">Verzendkosten boeken mislukt: {data.shippingExpenseError}</s-banner> : null}
-      </s-section>
-
+      <s-section heading="Automatische verzendkosten boeken"><s-paragraph>Boek één kwartaalpost voor PostNL/verzendlabels op basis van de verzendbedragen uit de geïmporteerde Shopify-orders. De app behandelt het verzendbedrag als inclusief 21% btw en zet de btw automatisch op voorbelasting / 5b.</s-paragraph><Form method="post" action="/app/shipping-costs"><input type="hidden" name="year" value={data.selectedYear} /><input type="hidden" name="quarter" value={data.selectedQuarter} /><button type="submit" style={secondaryButtonStyle}>Boek/herboek verzendkosten met 21% btw</button></Form>{data.shippingExpenseStatus === "booked" ? <s-banner tone="success">Verzendkosten zijn geboekt: totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan btw {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}{data.shippingExpenseStatus === "rebooked" ? <s-banner tone="success">Oude automatische verzendkostenpost is vervangen door een nieuwe post met 21% btw. Totaal {formatEuros(BigInt(data.shippingExpenseTotal || "0"))}, waarvan voorbelasting {formatEuros(BigInt(data.shippingExpenseVat || "0"))}.</s-banner> : null}{data.shippingExpenseStatus === "none" ? <s-banner tone="warning">Er zijn geen verzendbedragen gevonden in de geïmporteerde orders van dit kwartaal.</s-banner> : null}{data.shippingExpenseStatus === "error" ? <s-banner tone="critical">Verzendkosten boeken mislukt: {data.shippingExpenseError}</s-banner> : null}</s-section>
       <s-section heading={`BTW-aangifte overnemen ${data.periodLabel}`}><s-banner tone="warning">Controleer dit altijd vóór indienen. De app detecteert nu hoog/laag/0/overig via effectief btw-tarief per order. EU/OSS/export/verlegd blijven handmatig totdat die gegevens apart worden vastgelegd.</s-banner><div style={{ overflowX: "auto", marginTop: "1rem" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: "58rem" }}><thead><tr><th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Rubriek</th><th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Omschrijving</th><th style={{ textAlign: "right", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Omzet / waarde excl. btw</th><th style={{ textAlign: "right", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Btw-bedrag</th><th style={{ textAlign: "left", borderBottom: "1px solid #dfe3e8", padding: "0.6rem" }}>Opmerking</th></tr></thead><tbody>{data.declarationRows.map((row) => <tr key={row.code}><td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", fontWeight: 700 }}>{row.code}</td><td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem" }}>{row.label}</td><td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", textAlign: "right", whiteSpace: "nowrap" }}>{formatEuros(BigInt(row.amountCents))}</td><td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem", textAlign: "right", whiteSpace: "nowrap" }}>{formatEuros(BigInt(row.vatCents))}</td><td style={{ borderBottom: "1px solid #f1f2f4", padding: "0.6rem" }}>{row.note}</td></tr>)}</tbody></table></div></s-section>
       <s-section heading="Status"><s-unordered-list><s-list-item>{data.orders} Shopify-orders opgeslagen in dit kwartaal</s-list-item><s-list-item>{data.journals} definitieve journaalposten in dit kwartaal</s-list-item><s-list-item>{data.errors} openstaande verwerkingsfouten</s-list-item></s-unordered-list></s-section>
-      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Importeer eerst het kwartaal. Daarna kun je verzendkosten en Shopify transactiekosten automatisch boeken/herboeken.</s-paragraph></s-section>
+      <s-section heading="Synchronisatie"><s-paragraph>Kies hierboven een jaar en kwartaal. Importeer eerst het kwartaal. Daarna kun je verzendkosten automatisch boeken/herboeken.</s-paragraph></s-section>
     </s-page>
   );
 }
