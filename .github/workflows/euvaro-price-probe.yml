@@ -1,4 +1,4 @@
-name: EUVARO Alibaba Price Probe
+name: EUVARO Alibaba API Probe
 
 on:
   push:
@@ -13,20 +13,18 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install Playwright core
-        run: npm install playwright-core@1.55.0
-      - name: Probe Alibaba public product pages
-        working-directory: euvaro-price-audit
-        run: node price_probe.js
+      - name: Probe Alibaba anonymous Europe API
+        run: bash euvaro-price-audit/api_probe.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: euvaro-price-probe-results
-          path: euvaro-price-audit/probe-results.json
+          name: euvaro-api-probe-results
+          path: |
+            euvaro-price-audit/api-summary.json
+            euvaro-price-audit/api-page-1.json
+            euvaro-price-audit/api-page-2.json
+            euvaro-price-audit/csrf.json
           if-no-files-found: warn
