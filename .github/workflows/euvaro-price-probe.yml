@@ -19,10 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install Playwright
-        run: |
-          npm install playwright@1.55.0
-          npx playwright install chromium --with-deps
+      - name: Install Playwright core
+        run: npm install playwright-core@1.55.0
       - name: Probe Alibaba public product pages
         working-directory: euvaro-price-audit
         run: node price_probe.js

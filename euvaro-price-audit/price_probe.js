@@ -1,5 +1,5 @@
-const { chromium } = require('playwright');
-const fs = require('fs');
+import { chromium } from 'playwright-core';
+import fs from 'fs';
 
 const IDS = ['1601710618572','1601622528018','1601418450054','1601706114588','1601439204847'];
 
@@ -28,12 +28,12 @@ function priceish(obj, path='', depth=0, out=[]) {
 }
 
 (async()=>{
-  const browser = await chromium.launch({headless:true, args:['--no-sandbox','--disable-dev-shm-usage']});
+  const browser = await chromium.launch({headless:true, executablePath:'/usr/bin/google-chrome', args:['--no-sandbox','--disable-dev-shm-usage']});
   const context = await browser.newContext({
     locale:'en-US',
     timezoneId:'Europe/Amsterdam',
     viewport:{width:1440,height:1000},
-    userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
   });
   const results=[];
   for (const id of IDS) {
