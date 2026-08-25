@@ -1,0 +1,34 @@
+name: EUVARO Alibaba Price Probe
+
+on:
+  push:
+    branches: [euvaro-live-price-audit-20260825]
+    paths:
+      - 'euvaro-price-audit/**'
+      - '.github/workflows/euvaro-price-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          npm install playwright@1.55.0
+          npx playwright install chromium --with-deps
+      - name: Probe Alibaba public product pages
+        working-directory: euvaro-price-audit
+        run: node price_probe.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: euvaro-price-probe-results
+          path: euvaro-price-audit/probe-results.json
+          if-no-files-found: warn
